@@ -1,0 +1,25 @@
+# Core Framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-socketio==5.11.4
+python-multipart==0.0.12
+
+# AI & LLM
+pydantic-ai==0.0.14
+pydantic==2.9.2
+llama-cpp-python==0.3.1  # With Metal support for M4 Pro
+openai==1.54.3  # For OpenRouter compatibility
+
+# Data Processing
+pyyaml==6.0.2
+python-dateutil==2.9.0
+
+# Utilities
+python-dotenv==1.0.1
+loguru==0.7.2
+
+# Development
+ruff==0.7.4
+mypy==1.13.0
+pytest==8.3.3
+pytest-asyncio==0.24.0

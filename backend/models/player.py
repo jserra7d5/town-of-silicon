@@ -1,0 +1,59 @@
+"""Player data models."""
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+from .role import Role, FactionType
+
+
+class Player(BaseModel):
+    """Individual player in the game."""
+    player_id: int = Field(ge=1, le=15)
+    name: str
+    role: Role
+    faction: FactionType
+    is_human: bool = False
+    is_alive: bool = True
+    revealed: bool = False  # Mayor reveal, etc.
+
+    # Communication
+    last_will: str = Field(default="", max_length=200)
+    is_blackmailed: bool = False
+    can_speak: bool = True
+
+    # State
+    in_jail: bool = False
+    on_trial: bool = False
+    voted_today: bool = False
+
+    # Death info
+    death_night: int = 0
+    death_day: int = 0
+    death_cause: str | None = None
+
+    # Ability tracking
+    ability_uses_remaining: dict[str, int] = {}
+    last_action_night: int = 0
+
+
+class PlayerRoleAssignment(BaseModel):
+    """Role assignment for game initialization."""
+    player_id: int
+    role: Role
+    faction: FactionType
+    is_human: bool
+
+
+class DeathInfo(BaseModel):
+    """Information about a player's death."""
+    player_id: int
+    player_name: str
+    role: str
+    faction: str
+    night: int = 0
+    day: int = 0
+    cause: str
+    killed_by: int | None = None
+    last_will: str
+    death_note: str | None = None
+    cleaned: bool = False  # Janitor
+    timestamp: datetime = Field(default_factory=datetime.now)
