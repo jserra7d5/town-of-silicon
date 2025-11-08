@@ -1,0 +1,639 @@
+# Town of Salem Role Definitions
+# Complete role list with abilities, stats, and descriptions
+
+# TOWN ROLES
+
+town_investigative:
+  sheriff:
+    id: "sheriff"
+    name: "Sheriff"
+    faction: "Town"
+    category: "Town Investigative"
+    alignment: "Town Investigative"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Interrogate players to find evil-doers"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Interrogate"
+        description: "Check if a player is suspicious (Mafia/NK/Werewolf)"
+        action_type: "investigate"
+        priority: 4
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  investigator:
+    id: "investigator"
+    name: "Investigator"
+    faction: "Town"
+    category: "Town Investigative"
+    alignment: "Town Investigative"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Investigate players to find their exact role"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Investigate"
+        description: "Learn a player's possible roles (set of 3)"
+        action_type: "investigate"
+        priority: 4
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  lookout:
+    id: "lookout"
+    name: "Lookout"
+    faction: "Town"
+    category: "Town Investigative"
+    alignment: "Town Investigative"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Watch players at night to see who visits them"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Watch"
+        description: "See all players who visit your target"
+        action_type: "watch"
+        priority: 4
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+town_killing:
+  jailor:
+    id: "jailor"
+    name: "Jailor"
+    faction: "Town"
+    category: "Town Killing"
+    alignment: "Town Killing"
+    attack: 3  # Unstoppable when executing
+    defense: 0
+    unique: true
+    summary: "Jail and execute suspected criminals"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Jail"
+        description: "Jail a player (roleblock + protect)"
+        action_type: "jail"
+        priority: 3
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+      - name: "Execute"
+        description: "Execute jailed player (3 uses, lose if execute Town)"
+        action_type: "execute"
+        priority: 3
+        max_uses: 3
+        cooldown_nights: 0
+        targets_required: 0
+    immunities: ["roleblock"]
+
+  veteran:
+    id: "veteran"
+    name: "Veteran"
+    faction: "Town"
+    category: "Town Killing"
+    alignment: "Town Killing"
+    attack: 1  # Basic
+    defense: 1  # Basic (when on alert)
+    unique: true
+    summary: "Go on alert and kill all visitors"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Alert"
+        description: "Kill all visitors with basic attack"
+        action_type: "alert"
+        priority: 0
+        max_uses: 3
+        cooldown_nights: 0
+        targets_required: 0
+    immunities: ["roleblock"]
+
+  vigilante:
+    id: "vigilante"
+    name: "Vigilante"
+    faction: "Town"
+    category: "Town Killing"
+    alignment: "Town Killing"
+    attack: 1  # Basic
+    defense: 0
+    unique: false
+    summary: "Shoot suspected criminals at night"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Shoot"
+        description: "Shoot a player (3 bullets, die if shoot Town)"
+        action_type: "kill"
+        priority: 5
+        max_uses: 3
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+town_protective:
+  doctor:
+    id: "doctor"
+    name: "Doctor"
+    faction: "Town"
+    category: "Town Protective"
+    alignment: "Town Protective"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Heal players, giving them basic defense"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Heal"
+        description: "Give target basic defense for the night"
+        action_type: "heal"
+        priority: 3
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  bodyguard:
+    id: "bodyguard"
+    name: "Bodyguard"
+    faction: "Town"
+    category: "Town Protective"
+    alignment: "Town Protective"
+    attack: 2  # Powerful (counterattack)
+    defense: 0
+    unique: false
+    summary: "Protect players and counterattack their attackers"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Guard"
+        description: "Give target powerful defense and kill one attacker"
+        action_type: "guard"
+        priority: 0
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+town_support:
+  escort:
+    id: "escort"
+    name: "Escort"
+    faction: "Town"
+    category: "Town Support"
+    alignment: "Town Support"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Roleblock a player each night"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Roleblock"
+        description: "Prevent target from using their ability"
+        action_type: "roleblock"
+        priority: 2
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  mayor:
+    id: "mayor"
+    name: "Mayor"
+    faction: "Town"
+    category: "Town Support"
+    alignment: "Town Support"
+    attack: 0
+    defense: 0
+    unique: true
+    summary: "Reveal yourself for 3 votes"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Reveal"
+        description: "Permanently reveal as Mayor, vote counts as 3"
+        action_type: "reveal"
+        priority: 0
+        max_uses: 1
+        cooldown_nights: 0
+        targets_required: 0
+    immunities: []
+
+  transporter:
+    id: "transporter"
+    name: "Transporter"
+    faction: "Town"
+    category: "Town Support"
+    alignment: "Town Support"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Swap two players' positions each night"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Transport"
+        description: "Swap two players, redirecting all actions"
+        action_type: "transport"
+        priority: 1
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 2
+    immunities: []
+
+# MAFIA ROLES
+
+mafia_killing:
+  godfather:
+    id: "godfather"
+    name: "Godfather"
+    faction: "Mafia"
+    category: "Mafia Killing"
+    alignment: "Mafia Killing"
+    attack: 1  # Basic
+    defense: 1  # Basic
+    unique: true
+    summary: "Kill players each night and appear innocent"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Kill"
+        description: "Order a kill on a player"
+        action_type: "kill"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: ["detection"]
+
+  mafioso:
+    id: "mafioso"
+    name: "Mafioso"
+    faction: "Mafia"
+    category: "Mafia Killing"
+    alignment: "Mafia Killing"
+    attack: 1  # Basic
+    defense: 0
+    unique: false
+    summary: "Carry out the Godfather's orders"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Kill"
+        description: "Kill target (only if no Godfather)"
+        action_type: "kill"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+mafia_deception:
+  framer:
+    id: "framer"
+    name: "Framer"
+    faction: "Mafia"
+    category: "Mafia Deception"
+    alignment: "Mafia Deception"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Frame players to appear suspicious"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Frame"
+        description: "Make target appear suspicious to Sheriff"
+        action_type: "frame"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  janitor:
+    id: "janitor"
+    name: "Janitor"
+    faction: "Mafia"
+    category: "Mafia Deception"
+    alignment: "Mafia Deception"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Clean up kills to hide role and will"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Clean"
+        description: "Hide target's role and will (3 uses)"
+        action_type: "clean"
+        priority: 7
+        max_uses: 3
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  forger:
+    id: "forger"
+    name: "Forger"
+    faction: "Mafia"
+    category: "Mafia Deception"
+    alignment: "Mafia Deception"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Forge wills to deceive the Town"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Forge"
+        description: "Replace target's will (3 uses)"
+        action_type: "forge"
+        priority: 7
+        max_uses: 3
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+mafia_support:
+  blackmailer:
+    id: "blackmailer"
+    name: "Blackmailer"
+    faction: "Mafia"
+    category: "Mafia Support"
+    alignment: "Mafia Support"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Silence players and read whispers"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Blackmail"
+        description: "Silence target during next day, see all whispers"
+        action_type: "blackmail"
+        priority: 8
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  consigliere:
+    id: "consigliere"
+    name: "Consigliere"
+    faction: "Mafia"
+    category: "Mafia Support"
+    alignment: "Mafia Support"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Investigate players to learn their exact role"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Investigate"
+        description: "Learn target's exact role"
+        action_type: "investigate"
+        priority: 4
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  consort:
+    id: "consort"
+    name: "Consort"
+    faction: "Mafia"
+    category: "Mafia Support"
+    alignment: "Mafia Support"
+    attack: 0
+    defense: 1  # Basic
+    unique: false
+    summary: "Roleblock players each night"
+    goal: "Kill anyone who opposes the Mafia"
+    abilities:
+      - name: "Roleblock"
+        description: "Prevent target from using their ability"
+        action_type: "roleblock"
+        priority: 2
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+# NEUTRAL ROLES
+
+neutral_killing:
+  serial_killer:
+    id: "serial_killer"
+    name: "Serial Killer"
+    faction: "Neutral"
+    category: "Neutral Killing"
+    alignment: "Neutral Killing"
+    attack: 1  # Basic
+    defense: 1  # Basic
+    unique: false
+    summary: "Kill everyone who opposes you"
+    goal: "Kill everyone who would not submit to you"
+    abilities:
+      - name: "Kill"
+        description: "Kill target, also kill roleblockers"
+        action_type: "kill"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: ["roleblock"]
+
+  arsonist:
+    id: "arsonist"
+    name: "Arsonist"
+    faction: "Neutral"
+    category: "Neutral Killing"
+    alignment: "Neutral Killing"
+    attack: 3  # Unstoppable (when igniting)
+    defense: 1  # Basic
+    unique: false
+    summary: "Douse players in gasoline and burn them"
+    goal: "Live to see everyone burn"
+    abilities:
+      - name: "Douse"
+        description: "Douse target in gasoline"
+        action_type: "douse"
+        priority: 6
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+      - name: "Ignite"
+        description: "Kill all doused players"
+        action_type: "ignite"
+        priority: 6
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 0
+    immunities: ["roleblock"]
+
+  werewolf:
+    id: "werewolf"
+    name: "Werewolf"
+    faction: "Neutral"
+    category: "Neutral Killing"
+    alignment: "Neutral Killing"
+    attack: 2  # Powerful
+    defense: 1  # Basic
+    unique: false
+    summary: "Transform on full moon and maul players"
+    goal: "Kill everyone who would not submit to you"
+    abilities:
+      - name: "Maul"
+        description: "Kill target and all visitors (full moon only)"
+        action_type: "maul"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 1  # Every other night
+        targets_required: 1
+    immunities: ["roleblock"]
+
+neutral_evil:
+  jester:
+    id: "jester"
+    name: "Jester"
+    faction: "Neutral"
+    category: "Neutral Evil"
+    alignment: "Neutral Evil"
+    attack: 3  # Unstoppable (haunt)
+    defense: 0
+    unique: false
+    summary: "Get yourself lynched"
+    goal: "Get yourself lynched by any means necessary"
+    abilities:
+      - name: "Haunt"
+        description: "Kill one guilty voter after being lynched"
+        action_type: "haunt"
+        priority: 0
+        max_uses: 1
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  executioner:
+    id: "executioner"
+    name: "Executioner"
+    faction: "Neutral"
+    category: "Neutral Evil"
+    alignment: "Neutral Evil"
+    attack: 0
+    defense: 1  # Basic
+    unique: false
+    summary: "Get your target lynched"
+    goal: "Get your target lynched at any cost"
+    abilities: []
+    immunities: []
+
+  witch:
+    id: "witch"
+    name: "Witch"
+    faction: "Neutral"
+    category: "Neutral Evil"
+    alignment: "Neutral Evil"
+    attack: 0
+    defense: 1  # Basic
+    unique: false
+    summary: "Control players and force their actions"
+    goal: "Survive to see the Town lose"
+    abilities:
+      - name: "Control"
+        description: "Force a player to target another player"
+        action_type: "control"
+        priority: 1
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 2
+    immunities: []
+
+neutral_benign:
+  survivor:
+    id: "survivor"
+    name: "Survivor"
+    faction: "Neutral"
+    category: "Neutral Benign"
+    alignment: "Neutral Benign"
+    attack: 0
+    defense: 0  # 1 when vested
+    unique: false
+    summary: "Survive to the end"
+    goal: "Live to see the end of the game"
+    abilities:
+      - name: "Vest"
+        description: "Gain basic defense for the night (4 uses)"
+        action_type: "vest"
+        priority: 0
+        max_uses: 4
+        cooldown_nights: 0
+        targets_required: 0
+    immunities: []
+
+# ROLE LISTS
+
+role_lists:
+  classic:
+    name: "Classic"
+    description: "Traditional Town of Salem role list"
+    slots:
+      - position: 1
+        constraint:
+          type: "specific"
+          value: "jailor"
+      - position: 2
+        constraint:
+          type: "category"
+          value: "Town Investigative"
+      - position: 3
+        constraint:
+          type: "category"
+          value: "Town Killing"
+      - position: 4
+        constraint:
+          type: "category"
+          value: "Town Protective"
+      - position: 5
+        constraint:
+          type: "category"
+          value: "Town Support"
+      - position: 6
+        constraint:
+          type: "category"
+          value: "Town Support"
+      - position: 7
+        constraint:
+          type: "faction"
+          value: "Town"
+      - position: 8
+        constraint:
+          type: "faction"
+          value: "Town"
+      - position: 9
+        constraint:
+          type: "faction"
+          value: "Town"
+      - position: 10
+        constraint:
+          type: "specific"
+          value: "godfather"
+      - position: 11
+        constraint:
+          type: "specific"
+          value: "mafioso"
+      - position: 12
+        constraint:
+          type: "faction"
+          value: "Mafia"
+      - position: 13
+        constraint:
+          type: "category"
+          value: "Neutral Evil"
+      - position: 14
+        constraint:
+          type: "category"
+          value: "Neutral Killing"
+      - position: 15
+        constraint:
+          type: "any"
+          value: "any"

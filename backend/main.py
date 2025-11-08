@@ -5,36 +5,43 @@ Single-player Town of Salem with AI agents powered by oss-20b (64K context).
 """
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from config.settings import settings
-from ai.llm_client import llm_client
+from core.game_orchestrator import GameOrchestrator
+
+# Global game orchestrator instance
+game_orchestrator: GameOrchestrator = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
+    global game_orchestrator
+
     # Startup
     logger.info(f"Starting {settings.app_name}...")
     logger.info(f"LLM Provider: {settings.llm_provider}")
     logger.info(f"Context Size: {settings.llm_context_size:,} tokens (64K!)")
 
-    # Load LLM model
+    # Initialize game orchestrator
+    game_orchestrator = GameOrchestrator()
     try:
-        await asyncio.to_thread(llm_client.load_model)
-        logger.success("LLM model loaded successfully")
+        await game_orchestrator.initialize()
+        logger.success("Game orchestrator initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to load LLM model: {e}")
-        logger.warning("Application starting without LLM - AI players will not work")
+        logger.error(f"Failed to initialize game orchestrator: {e}")
+        logger.warning("Application starting with errors - game may not work")
 
     yield
 
     # Shutdown
     logger.info("Shutting down...")
-    llm_client.unload_model()
+    if game_orchestrator:
+        game_orchestrator.llm_client.unload_model()
     logger.info("Cleanup complete")
 
 
@@ -63,8 +70,9 @@ async def health_check():
     return {
         "status": "healthy",
         "app": settings.app_name,
-        "llm_loaded": llm_client._loaded,
-        "context_size": settings.llm_context_size
+        "llm_loaded": game_orchestrator.llm_client._loaded if game_orchestrator else False,
+        "context_size": settings.llm_context_size,
+        "game_active": game_orchestrator.running if game_orchestrator else False
     }
 
 
@@ -86,11 +94,80 @@ async def root():
     }
 
 
-# API routes (to be added)
-# from api import websocket, game, admin
-# app.include_router(websocket.router)
-# app.include_router(game.router, prefix="/api/game")
-# app.include_router(admin.router, prefix="/api/admin")
+# Game control endpoints
+@app.post("/api/game/create")
+async def create_game(human_position: int = None):
+    """Create a new game."""
+    if not game_orchestrator:
+        return {"error": "Game orchestrator not initialized"}
+
+    try:
+        game_state = await game_orchestrator.create_game(human_position)
+        return {
+            "status": "success",
+            "game_id": "main",  # Single game instance
+            "players": [
+                {
+                    "id": p.player_id,
+                    "name": p.name,
+                    "is_human": p.is_human
+                }
+                for p in game_state.players
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error creating game: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/game/start")
+async def start_game():
+    """Start the game loop."""
+    if not game_orchestrator:
+        return {"error": "Game orchestrator not initialized"}
+
+    if not game_orchestrator.game_state:
+        return {"error": "No game created - call /api/game/create first"}
+
+    # Start game in background task
+    asyncio.create_task(game_orchestrator.start_game())
+
+    return {
+        "status": "success",
+        "message": "Game started"
+    }
+
+
+@app.get("/api/game/state")
+async def get_game_state():
+    """Get current game state."""
+    if not game_orchestrator or not game_orchestrator.game_state:
+        return {"error": "No active game"}
+
+    return game_orchestrator.game_state.model_dump()
+
+
+# WebSocket endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time game communication.
+
+    Clients connect here to send/receive game events.
+    """
+    if not game_orchestrator:
+        await websocket.close(code=1011, reason="Game orchestrator not initialized")
+        return
+
+    # For now, all clients connect as observers
+    # In full implementation, would authenticate and assign player_id
+    player_id = None  # Human player would be 0
+
+    try:
+        await game_orchestrator.ws_handler.handle_connection(websocket, player_id)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await websocket.close(code=1011, reason=str(e))
 
 
 if __name__ == "__main__":
