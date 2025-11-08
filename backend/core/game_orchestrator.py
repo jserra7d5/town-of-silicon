@@ -149,19 +149,35 @@ class GameOrchestrator:
         # Start with pregame phase
         await self.run_pregame()
 
-        # Main game loop
+        # Main game loop with error recovery
         while self.running:
-            # Check win conditions
-            winner = self.check_victory()
-            if winner:
-                await self.end_game(winner)
-                break
+            try:
+                # Check win conditions
+                winner = self.check_victory()
+                if winner:
+                    await self.end_game(winner)
+                    break
 
-            # Run current phase
-            await self.run_current_phase()
+                # Run current phase
+                await self.run_current_phase()
 
-            # Transition to next phase
-            await self.transition_phase()
+                # Transition to next phase
+                await self.transition_phase()
+
+            except Exception as e:
+                logger.error(f"Critical error in game loop: {e}")
+                # Try to broadcast error and continue
+                try:
+                    await self.broadcast_system_message(
+                        f"Game error occurred: {str(e)[:100]}. Attempting to continue..."
+                    )
+                    # Force transition to next phase to recover
+                    await self.transition_phase()
+                except Exception as recovery_error:
+                    logger.error(f"Failed to recover from game loop error: {recovery_error}")
+                    # End game gracefully
+                    await self.end_game("draw")
+                    break
 
     async def run_pregame(self):
         """Run pregame phase (role reveal to each player)."""
@@ -182,33 +198,104 @@ class GameOrchestrator:
         # Wait for pregame duration
         await asyncio.sleep(self.game_state.current_phase.duration)
 
+    async def run_mafia_night_chat(self):
+        """Run Mafia coordination chat at start of night."""
+        # Get alive Mafia members
+        mafia_members = [
+            p for p in self.game_state.players
+            if p.is_alive and (
+                p.role.faction.value == "Mafia" if hasattr(p.role.faction, 'value')
+                else str(p.role.faction) == "Mafia"
+            )
+        ]
+
+        if len(mafia_members) <= 1:
+            # No coordination needed if only 1 or 0 Mafia left
+            return
+
+        logger.info(f"{len(mafia_members)} Mafia members coordinating...")
+
+        # Give Mafia members a chance to chat
+        await self.broadcast_system_message(
+            f"The Mafia is meeting in secret..."
+        )
+
+        # AI Mafia members discuss strategy
+        ai_mafia = [m for m in mafia_members if not m.is_human]
+
+        for mafia in ai_mafia:
+            # Decide if this Mafia member wants to say something
+            decision = await self.decision_engine.decide_chat_message(
+                self.game_state,
+                mafia.player_id,
+                context_hint="Mafia night chat - coordinate with other Mafia members"
+            )
+
+            if decision.should_speak and decision.message:
+                mafia_chat_msg = ChatMessage(
+                    player_id=mafia.player_id,
+                    player_name=f"[MAFIA] {mafia.name}",
+                    message=decision.message,
+                    phase=PhaseType.NIGHT.value,
+                    day_number=self.game_state.current_day,
+                    visible_to_dead=False
+                )
+
+                self.game_state.all_chat_messages.append(mafia_chat_msg)
+
+                # Broadcast to Mafia only
+                await self.connection_manager.broadcast_to_mafia(
+                    {
+                        "type": "mafia_chat",
+                        "message": mafia_chat_msg.model_dump()
+                    },
+                    self.game_state
+                )
+
+                logger.info(f"Mafia {mafia.name}: {decision.message}")
+
+        # Short delay for human Mafia member to read/respond
+        if any(m.is_human for m in mafia_members):
+            await asyncio.sleep(5)
+
     async def run_current_phase(self):
-        """Run the current phase."""
+        """Run the current phase with error handling."""
         phase_type = self.game_state.current_phase.phase_type
 
         logger.info(f"Running {phase_type.value} phase...")
 
-        if phase_type == PhaseType.NIGHT:
-            await self.run_night_phase()
+        try:
+            if phase_type == PhaseType.NIGHT:
+                await self.run_night_phase()
 
-        elif phase_type == PhaseType.DAY_DISCUSSION:
-            await self.run_day_discussion()
+            elif phase_type == PhaseType.DAY_DISCUSSION:
+                await self.run_day_discussion()
 
-        elif phase_type == PhaseType.DEFENSE:
-            await self.run_defense_phase()
+            elif phase_type == PhaseType.DEFENSE:
+                await self.run_defense_phase()
 
-        elif phase_type == PhaseType.JUDGMENT:
-            await self.run_judgment_phase()
+            elif phase_type == PhaseType.JUDGMENT:
+                await self.run_judgment_phase()
 
-        elif phase_type == PhaseType.JUDGMENT_RESULTS:
-            await self.run_judgment_results()
+            elif phase_type == PhaseType.JUDGMENT_RESULTS:
+                await self.run_judgment_results()
 
-        elif phase_type == PhaseType.LAST_WORDS:
-            await self.run_last_words()
+            elif phase_type == PhaseType.LAST_WORDS:
+                await self.run_last_words()
+
+        except Exception as e:
+            logger.error(f"Error in {phase_type.value} phase: {e}")
+            await self.broadcast_system_message(
+                f"Error in {phase_type.value} phase. Skipping to next phase..."
+            )
+            # Phase will be transitioned by caller
 
     async def run_night_phase(self):
         """Run night phase - collect and resolve night actions."""
         logger.info("Night phase starting...")
+
+        # Mafia coordination chat at start of night
+        await self.run_mafia_night_chat()
 
         # Get all living players with night abilities
         actors = [
@@ -284,39 +371,63 @@ class GameOrchestrator:
         # Run phase timer
         await self.phase_manager.run_phase_loop()
 
-        # Resolve night actions
+        # Resolve night actions with error handling
         logger.info(f"Resolving {len(actions)} night actions...")
-        summary = self.night_resolver.resolve_night(self.game_state, actions)
-
-        # Apply deaths
-        for death in summary.deaths:
-            player = next(
-                p for p in self.game_state.players
-                if p.player_id == death.player_id
+        try:
+            summary = self.night_resolver.resolve_night(self.game_state, actions)
+        except Exception as e:
+            logger.error(f"Error resolving night actions: {e}")
+            # Create empty summary to continue game
+            from ..actions.night_actions import NightResolutionSummary
+            summary = NightResolutionSummary()
+            await self.broadcast_system_message(
+                "An error occurred during night resolution. Continuing..."
             )
-            player.is_alive = False
-            player.death_info = death
-            self.game_state.all_deaths.append(death)
+
+        # Apply deaths with error recovery
+        for death in summary.deaths:
+            try:
+                player = next(
+                    p for p in self.game_state.players
+                    if p.player_id == death.player_id
+                )
+                player.is_alive = False
+                player.death_info = death
+                self.game_state.all_deaths.append(death)
+            except StopIteration:
+                logger.error(f"Could not find player {death.player_id} for death")
+            except Exception as e:
+                logger.error(f"Error applying death to player {death.player_id}: {e}")
 
         # Send action results to players
         for player_id, result in summary.action_results.items():
-            await self.connection_manager.send_to_player(
-                {
-                    "type": "night_action_result",
-                    "result": result.model_dump()
-                },
-                player_id
-            )
+            try:
+                await self.connection_manager.send_to_player(
+                    {
+                        "type": "night_action_result",
+                        "result": result.model_dump()
+                    },
+                    player_id
+                )
+            except Exception as e:
+                logger.error(f"Error sending action result to player {player_id}: {e}")
 
-        # Announce deaths
+        # Announce deaths with error handling
         if summary.deaths:
-            death_msg = f"{len(summary.deaths)} player(s) died last night: "
-            death_msg += ", ".join([
-                f"{next(p for p in self.game_state.players if p.player_id == d.player_id).name}"
-                for d in summary.deaths
-            ])
+            try:
+                death_msg = f"{len(summary.deaths)} player(s) died last night: "
+                death_names = []
+                for d in summary.deaths:
+                    try:
+                        player = next(p for p in self.game_state.players if p.player_id == d.player_id)
+                        death_names.append(player.name)
+                    except StopIteration:
+                        death_names.append(f"Player {d.player_id}")
 
-            await self.broadcast_system_message(death_msg)
+                death_msg += ", ".join(death_names)
+                await self.broadcast_system_message(death_msg)
+            except Exception as e:
+                logger.error(f"Error announcing deaths: {e}")
 
         logger.info(f"Night phase complete: {len(summary.deaths)} deaths")
 

@@ -105,12 +105,23 @@ class ConnectionManager:
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         """Send message to specific client."""
-        await websocket.send_json(message)
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            logger.error(f"Error sending personal message: {e}")
+            # Don't re-raise - client may have disconnected
 
     async def send_to_player(self, message: dict, player_id: int):
         """Send message to specific player by ID."""
         if player_id in self.player_connections:
-            await self.player_connections[player_id].send_json(message)
+            try:
+                await self.player_connections[player_id].send_json(message)
+            except Exception as e:
+                logger.error(f"Error sending to player {player_id}: {e}")
+                # Remove dead connection
+                ws = self.player_connections.get(player_id)
+                if ws:
+                    self.disconnect(ws, player_id)
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients."""
@@ -146,7 +157,10 @@ class ConnectionManager:
         """Broadcast message to Mafia members only."""
         mafia_ids = [
             p.player_id for p in game_state.players
-            if p.is_alive and p.role.faction == "Mafia"
+            if p.is_alive and (
+                p.role.faction.value == "Mafia" if hasattr(p.role.faction, 'value')
+                else str(p.role.faction) == "Mafia"
+            )
         ]
 
         for player_id in mafia_ids:
@@ -217,32 +231,38 @@ class WebSocketHandler:
         """Route incoming message to appropriate handler."""
         msg_type = message.type
 
-        if msg_type == "chat":
-            await self.handle_chat(message, player_id)
+        try:
+            if msg_type == "chat":
+                await self.handle_chat(message, player_id)
 
-        elif msg_type == "night_action":
-            await self.handle_night_action(message, player_id)
+            elif msg_type == "night_action":
+                await self.handle_night_action(message, player_id)
 
-        elif msg_type == "vote":
-            await self.handle_vote(message, player_id)
+            elif msg_type == "vote":
+                await self.handle_vote(message, player_id)
 
-        elif msg_type == "defense":
-            await self.handle_defense(message, player_id)
+            elif msg_type == "defense":
+                await self.handle_defense(message, player_id)
 
-        elif msg_type == "whisper":
-            await self.handle_whisper(message, player_id)
+            elif msg_type == "whisper":
+                await self.handle_whisper(message, player_id)
 
-        elif msg_type == "update_will":
-            await self.handle_update_will(message, player_id)
+            elif msg_type == "update_will":
+                await self.handle_update_will(message, player_id)
 
-        elif msg_type == "update_death_note":
-            await self.handle_update_death_note(message, player_id)
+            elif msg_type == "update_death_note":
+                await self.handle_update_death_note(message, player_id)
 
-        elif msg_type == "request_game_state":
-            await self.send_game_state(websocket)
+            elif msg_type == "request_game_state":
+                await self.send_game_state(websocket)
 
-        else:
-            logger.warning(f"Unknown message type: {msg_type}")
+            else:
+                logger.warning(f"Unknown message type: {msg_type}")
+                await self.send_error(player_id, f"Unknown message type: {msg_type}")
+
+        except Exception as e:
+            logger.error(f"Error handling {msg_type} from player {player_id}: {e}")
+            await self.send_error(player_id, f"Error processing {msg_type}: {str(e)}")
 
     async def handle_chat(self, message: WSMessage, player_id: Optional[int]):
         """Handle chat message from player."""
@@ -286,16 +306,27 @@ class WebSocketHandler:
                 self.game_state
             )
 
-        # If Mafia chat at night, only Mafia see
-        if (player.role.faction == "Mafia" and
-            self.game_state.current_phase.phase_type == PhaseType.NIGHT):
-            await self.manager.broadcast_to_mafia(
-                {
-                    "type": "mafia_chat",
-                    "message": chat_msg.model_dump()
-                },
-                self.game_state
-            )
+        # Handle Mafia chat at night - only Mafia members see it
+        if (player.role.faction.value == "Mafia" if hasattr(player.role.faction, 'value') else str(player.role.faction) == "Mafia"):
+            if self.game_state.current_phase.phase_type == PhaseType.NIGHT:
+                # During night, Mafia messages only go to Mafia members
+                mafia_chat_msg = ChatMessage(
+                    player_id=player_id,
+                    player_name=f"[MAFIA] {player.name}",
+                    message=text,
+                    phase=self.game_state.current_phase.phase_type.value,
+                    day_number=self.game_state.current_day,
+                    visible_to_dead=False
+                )
+                await self.manager.broadcast_to_mafia(
+                    {
+                        "type": "mafia_chat",
+                        "message": mafia_chat_msg.model_dump()
+                    },
+                    self.game_state
+                )
+                logger.info(f"Mafia member {player.name} sent night chat")
+                return  # Don't broadcast to everyone
 
     async def handle_night_action(self, message: WSMessage, player_id: Optional[int]):
         """Handle night action submission."""
@@ -516,3 +547,14 @@ class WebSocketHandler:
             (p for p in self.game_state.players if p.player_id == player_id),
             None
         )
+
+    async def send_error(self, player_id: Optional[int], error_message: str):
+        """Send error message to player."""
+        if player_id is not None:
+            await self.manager.send_to_player(
+                {
+                    "type": "error",
+                    "message": error_message
+                },
+                player_id
+            )
