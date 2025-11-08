@@ -25,10 +25,11 @@ class Player(BaseModel):
     on_trial: bool = False
     voted_today: bool = False
 
-    # Death info
+    # Death info (legacy fields for compatibility)
     death_night: int = 0
     death_day: int = 0
     death_cause: str | None = None
+    death_info: Optional["DeathInfo"] = None  # Full death information
 
     # Ability tracking
     ability_uses_remaining: dict[str, int] = {}
@@ -46,14 +47,18 @@ class PlayerRoleAssignment(BaseModel):
 class DeathInfo(BaseModel):
     """Information about a player's death."""
     player_id: int
-    player_name: str
-    role: str
-    faction: str
+    player_name: str = ""
+    role: str = ""
+    faction: str = ""
     night: int = 0
     day: int = 0
+    day_number: int = 0  # Alias for day
+    phase: str = "Unknown"
     cause: str
     killed_by: int | None = None
-    last_will: str
+    killer_id: int | None = None  # Alias for killed_by
+    last_will: str = ""
     death_note: str | None = None
     cleaned: bool = False  # Janitor
+    role_revealed: str | None = None  # For display purposes
     timestamp: datetime = Field(default_factory=datetime.now)

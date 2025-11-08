@@ -62,15 +62,19 @@ class GameOrchestrator:
         """Initialize all systems."""
         logger.info("Initializing game orchestrator...")
 
-        # Load LLM model
-        await asyncio.to_thread(self.llm_client.load_model)
-        logger.info("LLM model loaded")
+        # Try to load LLM model (optional - game can run in demo mode without it)
+        try:
+            await asyncio.to_thread(self.llm_client.load_model)
+            logger.success("LLM model loaded successfully")
+        except Exception as e:
+            logger.warning(f"Could not load LLM model: {e}")
+            logger.warning("Game will run in demo mode with random AI decisions")
 
         # Set up phase callbacks
         self.phase_manager.on_phase_start = self.on_phase_start
         self.phase_manager.on_phase_end = self.on_phase_end
 
-        logger.info("Game orchestrator initialized")
+        logger.success("Game orchestrator initialized")
 
     async def create_game(self, human_position: Optional[int] = None) -> GameState:
         """

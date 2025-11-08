@@ -7,9 +7,9 @@ from loguru import logger
 
 from ..models.role import (
     Role, RoleList, RoleSlot, RoleConstraint, RoleAbility,
-    FactionType, AttackValue, DefenseValue, PlayerRoleAssignment
+    FactionType, AttackValue, DefenseValue
 )
-from ..models.player import Player
+from ..models.player import Player, PlayerRoleAssignment
 
 
 class RoleRegistry:

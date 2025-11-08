@@ -4,14 +4,19 @@ Town of Silicon - Main FastAPI Application
 Single-player Town of Salem with AI agents powered by oss-20b (64K context).
 """
 import asyncio
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from config.settings import settings
-from core.game_orchestrator import GameOrchestrator
+# Add parent directory to path for imports to work
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from backend.config.settings import settings
+from backend.core.game_orchestrator import GameOrchestrator
 
 # Global game orchestrator instance
 game_orchestrator: GameOrchestrator = None

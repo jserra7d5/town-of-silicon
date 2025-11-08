@@ -31,14 +31,15 @@ class GamePhase(BaseModel):
 
 class ChatMessage(BaseModel):
     """A single chat message."""
-    message_id: int
-    sender_id: int
-    sender_name: str
-    content: str = Field(max_length=200)
-    timestamp: datetime = Field(default_factory=datetime.now)
+    player_id: int
+    player_name: str
+    message: str = Field(max_length=200)
+    phase: str
     day_number: int
+    timestamp: datetime = Field(default_factory=datetime.now)
     is_whisper: bool = False
     whisper_to: int | None = None
+    visible_to_dead: bool = False
 
 
 class VoteRecord(BaseModel):
@@ -64,11 +65,11 @@ class NightActionRecord(BaseModel):
 
 class GameState(BaseModel):
     """Complete game state - with 64K context, we keep EVERYTHING!"""
-    game_id: str
+    game_id: str = "main"  # Default game ID
     created_at: datetime = Field(default_factory=datetime.now)
 
     # Players
-    players: list[Player] = Field(min_length=15, max_length=15)
+    players: list[Player] = []  # Will be populated during game creation
 
     # Phase tracking
     current_phase: GamePhase
@@ -84,6 +85,7 @@ class GameState(BaseModel):
     # Current trial state
     accused_player_id: int | None = None
     votes_to_accuse: dict[int, list[int]] = {}  # accused_id: [voter_ids]
+    last_judgment_result: dict | None = None  # Store as dict to avoid circular import
 
     # Game status
     is_game_over: bool = False

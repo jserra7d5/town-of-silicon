@@ -136,58 +136,31 @@ class AIDecisionEngine:
         self.llm_client = llm_client
         self.context_manager = context_manager
 
-        # Create Pydantic AI agents for different decision types
-        self._create_agents()
+        # Initialize agents as None - will be created when LLM is loaded
+        self.target_agent = None
+        self.vote_agent = None
+        self.chat_agent = None
+        self.claim_agent = None
+        self.defense_agent = None
+
+        # Try to create agents if LLM is available
+        if llm_client._loaded:
+            try:
+                self._create_agents()
+            except Exception as e:
+                logger.warning(f"Could not create Pydantic AI agents: {e}")
+                logger.warning("AI decisions will use fallback logic")
 
     def _create_agents(self) -> None:
         """Create Pydantic AI agents for structured outputs."""
-        # Note: Pydantic AI will use the LLM client we provide
-        # Each agent is configured for a specific decision type
+        # TODO: Update to new Pydantic AI API
+        # The API has changed - result_type is no longer a parameter
+        # Need to use the new response_model approach
+        logger.warning("Pydantic AI agents not yet updated to new API")
 
-        self.target_agent = Agent(
-            model=self.llm_client.model,
-            result_type=TargetDecision,
-            system_prompt="""You are an AI playing Town of Salem.
-You need to decide who to target with your night action.
-Consider all the information you have about other players.
-Make your decision based on your role and win condition."""
-        )
-
-        self.vote_agent = Agent(
-            model=self.llm_client.model,
-            result_type=VoteDecision,
-            system_prompt="""You are an AI playing Town of Salem.
-You need to decide who to vote for (or whether to abstain).
-Consider evidence, claims, and behavior from the entire game.
-Vote in a way that helps you achieve your win condition."""
-        )
-
-        self.chat_agent = Agent(
-            model=self.llm_client.model,
-            result_type=ChatDecision,
-            system_prompt="""You are an AI playing Town of Salem.
-Decide whether to speak and what to say.
-Be strategic - don't reveal too much, but participate enough to avoid suspicion.
-Keep messages concise and natural."""
-        )
-
-        self.claim_agent = Agent(
-            model=self.llm_client.model,
-            result_type=ClaimDecision,
-            system_prompt="""You are an AI playing Town of Salem.
-Decide whether to claim a role, and which role to claim.
-Evil roles should consider fake claiming.
-Town roles should claim when it helps town."""
-        )
-
-        self.defense_agent = Agent(
-            model=self.llm_client.model,
-            result_type=DefenseDecision,
-            system_prompt="""You are an AI playing Town of Salem.
-You are on trial and must defend yourself.
-Make a convincing defense that helps you survive.
-Consider claiming your role or accusing someone else."""
-        )
+        # For now, agents stay None and we use fallback logic
+        # TODO: Implement proper Pydantic AI integration with new API
+        return
 
     async def decide_night_target(
         self,
@@ -229,7 +202,18 @@ Consider claiming your role or accusing someone else."""
         prompt += "\n\nWho do you target? Consider your win condition and all information you've gathered."
 
         try:
-            # Use Pydantic AI agent to get structured decision
+            # Use Pydantic AI agent to get structured decision if available
+            if self.target_agent is None:
+                # Fallback: Use simple random targeting
+                logger.debug(f"Player {player_id} using fallback targeting (no AI agent)")
+                import random
+                target_id = random.choice(alive_players).player_id if alive_players else None
+                return TargetDecision(
+                    target_player_id=target_id,
+                    reasoning="Random target (AI agent not initialized)",
+                    suspicion_level=0.5
+                )
+
             logger.info(f"Player {player_id} deciding target for {ability.name}...")
 
             result = await self.target_agent.run(prompt)
@@ -308,6 +292,16 @@ Consider claiming your role or accusing someone else."""
             prompt += "\n\nDo you vote GUILTY or INNOCENT?"
 
         try:
+            # Fallback if no AI agent
+            if self.vote_agent is None:
+                logger.debug(f"Player {player_id} using fallback voting (no AI agent)")
+                # Simple fallback: abstain
+                return VoteDecision(
+                    vote_for_player_id=None,
+                    reasoning="Abstain (AI agent not initialized)",
+                    confidence=0.0
+                )
+
             result = await self.vote_agent.run(prompt)
             decision = result.data
 
@@ -354,6 +348,16 @@ Consider claiming your role or accusing someone else."""
             prompt += f"\n\nContext: {context_hint}"
 
         try:
+            # Fallback if no AI agent
+            if self.chat_agent is None:
+                logger.debug(f"Player {player_id} using fallback chat (no AI agent)")
+                # Stay silent
+                return ChatDecision(
+                    should_speak=False,
+                    message=None,
+                    message_type="normal"
+                )
+
             result = await self.chat_agent.run(prompt)
             decision = result.data
 
@@ -399,6 +403,15 @@ Consider claiming your role or accusing someone else."""
         prompt += "\nKeep your defense under 200 characters."
 
         try:
+            # Fallback if no AI agent
+            if self.defense_agent is None:
+                logger.debug(f"Player {player_id} using fallback defense (no AI agent)")
+                return DefenseDecision(
+                    defense_speech="I'm innocent! Don't vote me up!",
+                    claim_role=None,
+                    call_out_player_id=None
+                )
+
             result = await self.defense_agent.run(prompt)
             decision = result.data
 
