@@ -1,0 +1,332 @@
+FILENAME: ai_memory_system_spec.txt
+
+SYSTEM: AI Memory System
+
+DEPENDENCIES:
+- AI Context Management (stores and retrieves memory)
+- All game systems (events to remember)
+
+DATA STRUCTURES:
+
+AIMemory:
+  - player_id: int
+  - suspicion_levels: Dict[int, SuspicionData]
+  - role_claims: Dict[int, RoleClaim]
+  - behavioral_observations: Dict[int, List[Observation]]
+  - investigation_memory: List[InvestigationMemory]
+  - vote_patterns: Dict[int, VotePattern]
+  - alliance_trust: Dict[int, float]  # -1.0 to 1.0
+  - important_quotes: List[Quote]
+  - strategic_notes: List[str]
+
+SuspicionData:
+  - player_id: int
+  - level: float (0.0 = innocent, 1.0 = definitely evil)
+  - reasons: List[str]
+  - last_updated: int (night number)
+
+RoleClaim:
+  - player_id: int
+  - claimed_role: str
+  - day_claimed: int
+  - believability: float (0.0-1.0)
+  - evidence: List[str]
+  - contradictions: List[str]
+
+Observation:
+  - player_id: int
+  - behavior: str
+  - context: str
+  - significance: float (0.0-1.0)
+  - night_day: str
+
+InvestigationMemory:
+  - target_id: int
+  - result: str
+  - night: int
+  - investigator_role: str
+
+VotePattern:
+  - player_id: int
+  - votes_cast: List[VoteRecord]
+  - pattern_analysis: str
+
+VoteRecord:
+  - day: int
+  - voted_for: int
+  - speed: str ("early", "mid", "late")
+  - followed_crowd: bool
+
+Quote:
+  - player_id: int
+  - message: str
+  - day: int
+  - significance: str
+
+MEMORY OPERATIONS:
+
+1. Update Suspicion:
+```python
+def update_suspicion(memory: AIMemory, player_id: int, delta: float, reason: str):
+    if player_id not in memory.suspicion_levels:
+        memory.suspicion_levels[player_id] = SuspicionData(
+            player_id=player_id,
+            level=0.5,  # neutral starting point
+            reasons=[],
+            last_updated=0
+        )
+
+    sus_data = memory.suspicion_levels[player_id]
+    sus_data.level = max(0.0, min(1.0, sus_data.level + delta))
+    sus_data.reasons.append(reason)
+    sus_data.last_updated = current_night
+```
+
+2. Record Role Claim:
+```python
+def record_claim(memory: AIMemory, player_id: int, role: str, day: int):
+    # Check for contradictions
+    contradictions = []
+    if player_id in memory.role_claims:
+        old_claim = memory.role_claims[player_id]
+        if old_claim.claimed_role != role:
+            contradictions.append(
+                f"Changed claim from {old_claim.claimed_role} to {role}"
+            )
+
+    memory.role_claims[player_id] = RoleClaim(
+        player_id=player_id,
+        claimed_role=role,
+        day_claimed=day,
+        believability=0.7,  # default, can be updated
+        evidence=[],
+        contradictions=contradictions
+    )
+```
+
+3. Record Observation:
+```python
+def record_observation(memory: AIMemory, player_id: int, behavior: str, significance: float):
+    if player_id not in memory.behavioral_observations:
+        memory.behavioral_observations[player_id] = []
+
+    memory.behavioral_observations[player_id].append(Observation(
+        player_id=player_id,
+        behavior=behavior,
+        context=current_game_state(),
+        significance=significance,
+        night_day=f"D{day_number}"
+    ))
+```
+
+4. Analyze Vote Patterns:
+```python
+def analyze_vote_pattern(memory: AIMemory, player_id: int) -> str:
+    votes = memory.vote_patterns[player_id].votes_cast
+
+    # Analyze tendencies
+    early_votes = sum(1 for v in votes if v.speed == "early")
+    follows_crowd = sum(1 for v in votes if v.followed_crowd)
+
+    if early_votes > len(votes) * 0.7:
+        return "aggressive_voter"
+    elif follows_crowd > len(votes) * 0.7:
+        return "bandwagoner"
+    else:
+        return "independent_thinker"
+```
+
+MEMORY UPDATES (Events):
+
+Player Claims Role:
+  - Record in role_claims
+  - Cross-check with previous claims
+  - Update believability
+
+Player Votes:
+  - Record in vote_patterns
+  - Analyze timing (early/late)
+  - Check if following crowd
+
+Player Shares Investigation Result:
+  - Record in investigation_memory
+  - Cross-check with own knowledge
+  - Flag contradictions
+
+Player Dies:
+  - Role revealed
+  - Validate all claims and suspicions
+  - Update trust levels of other players who defended/accused them
+
+Investigation Performed (By Self):
+  - Store result prominently
+  - Update suspicion level of target
+  - Plan to share info (if Town)
+
+Attacked But Survived:
+  - Remember self was attacked
+  - Increase suspicion of likely attackers
+
+Transported:
+  - Note Transporter exists
+  - Adjust targeting strategy
+
+SUSPICION ADJUSTMENT RULES:
+
+Increase Suspicion (+0.1 to +0.4):
+  - Sheriff result: Suspicious (+0.5)
+  - Voted innocent on confirmed Mafia (+0.3)
+  - Claimed taken role (contradiction) (+0.3)
+  - Very quiet (no contribution) (+0.1)
+  - Defensive when accused (+0.1)
+  - Voted Town member aggressively (+0.2)
+
+Decrease Suspicion (-0.1 to -0.4):
+  - Sheriff result: Not Suspicious (-0.3)
+  - Voted guilty on confirmed Mafia (-0.3)
+  - Shared helpful information (-0.2)
+  - Consistent role claim with evidence (-0.2)
+  - Protected by confirmed Town (-0.3)
+
+TRUST LEVELS:
+
+High Trust (0.7-1.0):
+  - Confirmed Town (dead Town members validated them)
+  - Shared accurate investigation results
+  - Consistently voted evil correctly
+
+Neutral Trust (0.3-0.6):
+  - No strong evidence either way
+  - Default for most players
+
+Low Trust (0.0-0.2):
+  - High suspicion
+  - Contradictory claims
+  - Suspicious voting patterns
+
+Distrust (-0.1 to -1.0):
+  - Confirmed evil (investigations)
+  - Obvious lies
+  - Hostile actions
+
+MEMORY CONSOLIDATION:
+
+Every 2-3 days, consolidate memory:
+  - Summarize old behavioral observations
+  - Keep only significant events
+  - Update overall player assessments
+
+Example Consolidation:
+```python
+def consolidate_memory(memory: AIMemory, current_day: int):
+    # Summarize old observations (days 1-2)
+    if current_day > 3:
+        for player_id in memory.behavioral_observations:
+            old_obs = [o for o in memory.behavioral_observations[player_id]
+                      if int(o.night_day[1:]) < current_day - 2]
+
+            if len(old_obs) > 5:
+                # Summarize
+                summary = f"Early game: {len(old_obs)} observations, mostly {dominant_behavior(old_obs)}"
+                memory.strategic_notes.append(summary)
+
+                # Keep only significant ones
+                memory.behavioral_observations[player_id] = [
+                    o for o in memory.behavioral_observations[player_id]
+                    if o.significance > 0.6 or int(o.night_day[1:]) >= current_day - 2
+                ]
+```
+
+MEMORY RETRIEVAL:
+
+Get Top Suspicious Players:
+```python
+def get_top_suspicious(memory: AIMemory, n: int = 3) -> List[int]:
+    sorted_players = sorted(
+        memory.suspicion_levels.items(),
+        key=lambda x: x[1].level,
+        reverse=True
+    )
+    return [p[0] for p in sorted_players[:n]]
+```
+
+Get Most Trusted Players:
+```python
+def get_most_trusted(memory: AIMemory, n: int = 3) -> List[int]:
+    sorted_players = sorted(
+        memory.alliance_trust.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    return [p[0] for p in sorted_players[:n]]
+```
+
+IMPLEMENTATION:
+
+```python
+from pydantic import BaseModel
+from typing import Dict, List
+
+class SuspicionData(BaseModel):
+    player_id: int
+    level: float
+    reasons: List[str]
+    last_updated: int
+
+class RoleClaim(BaseModel):
+    player_id: int
+    claimed_role: str
+    day_claimed: int
+    believability: float
+    contradictions: List[str] = []
+
+class AIMemory(BaseModel):
+    player_id: int
+    suspicion_levels: Dict[int, SuspicionData] = {}
+    role_claims: Dict[int, RoleClaim] = {}
+    alliance_trust: Dict[int, float] = {}
+
+class AIMemorySystem:
+    def update_suspicion(self, memory: AIMemory, player_id: int,
+                        delta: float, reason: str):
+        if player_id not in memory.suspicion_levels:
+            memory.suspicion_levels[player_id] = SuspicionData(
+                player_id=player_id,
+                level=0.5,
+                reasons=[],
+                last_updated=0
+            )
+
+        sus = memory.suspicion_levels[player_id]
+        sus.level = max(0.0, min(1.0, sus.level + delta))
+        sus.reasons.append(reason)
+
+    def get_suspicion_summary(self, memory: AIMemory) -> Dict:
+        return {
+            player_id: {
+                "level": data.level,
+                "top_reasons": data.reasons[-3:]
+            }
+            for player_id, data in memory.suspicion_levels.items()
+        }
+```
+
+EDGE CASES:
+
+1. Contradictory Information:
+   - Player claims Sheriff, but Sheriff already revealed
+   - Solution: Flag contradiction, increase suspicion
+
+2. Memory Overflow:
+   - Too many observations
+   - Solution: Periodic consolidation, keep only significant
+
+3. Role Change (Amnesiac):
+   - AI's own role changes
+   - Solution: Reset objectives, maintain memory of others
+
+PERFORMANCE:
+
+- Memory updates: <10ms
+- Memory retrieval: <5ms
+- Consolidation: <100ms (done infrequently)

@@ -1,0 +1,191 @@
+FILENAME: investigation_result_system_spec.txt
+
+SYSTEM: Investigation Result System
+
+DEPENDENCIES:
+- Night Action System (investigations are night actions)
+- Role Assignment System (results based on target's role)
+- AI Context Management (AI processes investigation results)
+
+DATA STRUCTURES:
+
+InvestigationResult:
+  - investigator_id: int
+  - target_id: int
+  - night_number: int
+  - result_type: ResultType
+  - result_data: Dict
+  - was_framed: bool
+  - was_disguised: bool
+
+ResultType (enum):
+  - SHERIFF: "sheriff" (Suspicious/Not Suspicious)
+  - INVESTIGATOR: "investigator" (Set of 3 roles)
+  - LOOKOUT: "lookout" (List of visitors)
+  - CONSIGLIERE: "consigliere" (Exact role)
+  - SPY: "spy" (Mafia targets + chat)
+
+SheriffResult:
+  - target_name: str
+  - is_suspicious: bool
+  - message: str
+
+InvestigatorResult:
+  - target_name: str
+  - possible_roles: List[str] (3 roles)
+  - message: str
+
+LookoutResult:
+  - target_name: str
+  - visitors: List[str] (player names)
+  - message: str
+
+ConsigliereResult:
+  - target_name: str
+  - exact_role: str
+  - message: str
+
+INVESTIGATION RESULT SETS:
+
+Investigator Results (returns 1 of 3 possible roles):
+  - Sheriff, Executioner, Werewolf
+  - Framer, Vampire, Jester
+  - Lookout, Forger
+  - Spy, Blackmailer, Jailor
+  - Doctor, Disguiser, Serial Killer
+  - Investigator, Mayor, Tracker
+  - Bodyguard, Godfather, Arsonist
+  - Medium, Janitor, Retributionist
+  - Vigilante, Veteran, Mafioso, Ambusher
+  - Escort, Transporter, Consort, Hypnotist
+  - Survivor, Vampire Hunter, Amnesiac, Medusa
+  - Consigliere, Poisoner, Coven Leader
+  - Potion Master, Necromancer, Crusader
+
+Sheriff Results:
+  - Suspicious: Mafia (except GF), Serial Killer, Werewolf, Arsonist
+  - Not Suspicious: Town, Godfather, Neutral Benign, Neutral Evil
+
+Framer Effect:
+  - Framed Town member appears "Suspicious" to Sheriff
+  - Framer must frame same night Sheriff checks
+
+Disguiser Effect:
+  - Disguiser appears as disguise target's role
+  - Affects all investigations
+
+LOGIC FLOW:
+
+1. Investigation Submission:
+   - Player submits investigation action at night
+   - Target selected via Night Action System
+
+2. Investigation Resolution:
+   - Resolve during Night Action priority 4
+   - Check for modifiers (Framer, Disguiser)
+   - Generate appropriate result based on investigator role
+
+3. Sheriff Investigation:
+   ```python
+   def resolve_sheriff(target_role, was_framed):
+       if was_framed:
+           return "Suspicious"
+       if target_role in ["Godfather"]:
+           return "Not Suspicious"  # GF is detection immune
+       if target_role in ["Serial Killer", "Werewolf", "Arsonist"] or is_mafia(target_role):
+           return "Suspicious"
+       return "Not Suspicious"
+   ```
+
+4. Investigator Investigation:
+   - Look up target's role in result sets
+   - Return matching set of 3 roles
+   - Example: Target is Sheriff → Return "Sheriff, Executioner, or Werewolf"
+
+5. Lookout Investigation:
+   - Track all players who submitted actions targeting watched player
+   - Return list of visitor names
+   - If no visitors: "Your target was not visited by anyone"
+
+6. Result Delivery:
+   - Store result in InvestigationResult
+   - Queue for delivery at day start
+   - Display to investigator in notification panel
+
+7. AI Result Processing:
+   - AI receives investigation result
+   - AI updates knowledge base
+   - AI uses result for decision-making (voting, targeting)
+
+UI REQUIREMENTS:
+
+Investigation Result Panel:
+  - Appears at day start
+  - Header: "Investigation Results - Night {N}"
+  - Display result with formatting:
+    * Sheriff: "Your target is Suspicious/Not Suspicious"
+    * Investigator: "Your target is a {Role1}, {Role2}, or {Role3}!"
+    * Lookout: "You saw {Name1}, {Name2} visit your target"
+  - "Dismiss" button
+
+Result History:
+  - Tab showing all past investigation results
+  - Searchable and filterable
+  - Format: "N{night}: {target} - {result}"
+
+AI BEHAVIOR:
+
+AI Investigation Priority:
+  - Investigate suspicious players
+  - Investigate vocal/influential players
+  - Avoid investigating confirmed Town
+  - Spread investigations across different players
+
+AI Result Utilization:
+  - Update suspicion levels
+  - Share results in day chat (if Town)
+  - Use for targeting decisions
+  - Record in will
+
+VALIDATION RULES:
+
+1. Target must be alive
+2. Investigator must be alive
+3. Investigation not roleblocked
+4. Results only delivered to investigator
+
+EDGE CASES:
+
+1. Target Transported:
+   - Investigation redirected to swapped player
+   - Result for swapped player, not original target
+
+2. Framer + Sheriff Same Night:
+   - If Framer frames target AND Sheriff checks target
+   - Sheriff gets "Suspicious" result
+
+3. Multiple Lookouts Watch Same Target:
+   - Both get same visitor list
+
+4. Lookout Watches Transporter Target:
+   - Sees visitors to swapped player
+
+IMPLEMENTATION:
+
+```python
+class InvestigationSystem:
+    INVESTIGATOR_RESULTS = {
+        "Sheriff": ["Sheriff", "Executioner", "Werewolf"],
+        "Godfather": ["Bodyguard", "Godfather", "Arsonist"],
+        # ... all roles
+    }
+
+    def resolve_sheriff(self, target_role, was_framed):
+        if was_framed:
+            return SheriffResult(
+                target_name=target.name,
+                is_suspicious=True,
+                message="Your target is suspicious!"
+            )
+        # ... standard logic
+```

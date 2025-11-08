@@ -1,0 +1,227 @@
+FILENAME: player_list_display_spec.txt
+
+SYSTEM: Player List Display
+
+DEPENDENCIES:
+- Role Assignment System (player roles and positions)
+- Death System (dead/alive status)
+- Voting System (vote counts and trial status)
+- Phase Management System (context for available actions)
+
+DATA STRUCTURES:
+
+PlayerListEntry:
+  - player_id: int
+  - position: int (1-15)
+  - name: str
+  - role: str | null (null if not revealed)
+  - faction: str | null
+  - is_alive: bool
+  - is_on_trial: bool
+  - votes_against: int
+  - is_human: bool
+  - status_indicators: List[StatusIndicator]
+
+StatusIndicator:
+  - type: IndicatorType
+  - icon: str
+  - tooltip: str
+  - color: str
+
+IndicatorType (enum):
+  - DEAD: Skull icon, gray
+  - MAYOR_REVEALED: Crown icon, gold
+  - ON_TRIAL: Gavel icon, red
+  - JAILED: Chains icon, purple
+  - BLACKMAILED: Muted icon, dark red
+  - PROTECTED: Shield icon, blue
+  - VOTED_TODAY: Checkmark, gray
+
+PlayerListFilter:
+  - show_dead: bool
+  - show_role: bool (revealed roles only or all if spectating)
+  - sort_by: SortMode
+
+SortMode (enum):
+  - POSITION: By player number (1-15)
+  - STATUS: Living first, then dead
+  - ROLE: Alphabetically by revealed role
+  - FACTION: Town, Mafia, Neutral groups
+
+DISPLAY FEATURES:
+
+Core Information:
+  - Player number (1-15)
+  - Player name
+  - Status (alive/dead)
+  - Revealed role (if dead or revealed)
+  - Vote count (if being voted)
+
+Visual Indicators:
+  - Alive players: Normal brightness
+  - Dead players: Grayed out, strikethrough, skull icon
+  - On trial: Red highlight
+  - Voted today: Gray checkmark
+  - Mayor revealed: Gold border, crown icon
+
+Faction Color Coding:
+  - Town: Green text/border
+  - Mafia: Red text/border
+  - Neutral: Gray text/border
+  - Unknown: White (not yet revealed)
+
+Interactive Elements:
+  - Click player to open context menu:
+    * Vote (if day)
+    * Whisper to
+    * Target (if night and have ability)
+    * View details (death info, will)
+
+Vote Display:
+  - Show votes against each player
+  - Format: "Player Name (3/8)" (3 votes out of 8 needed)
+  - Update in real-time
+  - Mayor's votes shown as "3" count
+
+LOGIC FLOW:
+
+1. Initial Render:
+   - Load all 15 players
+   - Sort by position
+   - Display in list/grid format
+
+2. Real-Time Updates:
+   - Death: Gray out, add skull, strikethrough
+   - Role reveal: Add role name and faction color
+   - Votes: Update vote counter
+   - Status changes: Add/remove indicators
+
+3. Context Menu:
+   - Right-click player
+   - Show available actions based on:
+     * Current phase
+     * Player's role
+     * Target's status (alive/dead)
+
+4. Filtering:
+   - Toggle "Show Dead" (hide/show dead players)
+   - Sort by position/status/role/faction
+   - Search by name
+
+UI REQUIREMENTS:
+
+Layout:
+  - Vertical list (sidebar) or grid (main panel)
+  - Each entry shows:
+    * Position number (small, gray)
+    * Name (bold, large)
+    * Role + Faction (if revealed)
+    * Status indicators (icons)
+    * Vote count (if applicable)
+
+Styling:
+  - Living: Full opacity, white/colored text
+  - Dead: 50% opacity, gray, strikethrough
+  - Human player: Special border (highlight own entry)
+  - On trial: Red background
+
+Hover Effects:
+  - Show detailed tooltip:
+    * Full role description (if revealed)
+    * Death info (cause, night died)
+    * Last will preview
+  - Highlight player name in chat logs
+
+Click Actions:
+  - Left-click: Select for targeting
+  - Right-click: Context menu
+  - Double-click: View full details
+
+Responsive Design:
+  - Scrollable if all 15 players don't fit
+  - Collapsible dead players section
+  - Mobile-friendly layout option
+
+AI BEHAVIOR:
+
+AI Player List Usage:
+  - AI reads player list state
+  - Knows who is alive/dead
+  - Sees revealed roles
+  - Uses for targeting decisions
+
+AI Does Not See:
+  - Hidden roles (unrevealed)
+  - Other players' exact suspicion levels
+  - System metadata
+
+VALIDATION RULES:
+
+1. Always show all 15 players (even if disconnected)
+2. Dead players cannot be targeted for most actions
+3. Revealed roles must match actual roles
+4. Vote counts must be accurate
+
+EDGE CASES:
+
+1. Player Disconnects:
+   - Still show in list
+   - Mark as "Disconnected" (gray)
+   - Reveal role if dead
+
+2. Disguiser Death:
+   - Show disguised role initially
+   - Reveal true role when Disguiser dies
+
+3. Mayor Reveals:
+   - Add crown icon immediately
+   - Update vote weight display
+
+4. 15 Deaths Reviewed:
+   - Graveyard view replaces player list
+   - Or separate graveyard tab
+
+IMPLEMENTATION:
+
+```python
+class PlayerListEntry(BaseModel):
+    player_id: int
+    position: int
+    name: str
+    role: Optional[str] = None
+    is_alive: bool = True
+    is_on_trial: bool = False
+    votes_against: int = 0
+    status_indicators: List[str] = []
+
+class PlayerListDisplay:
+    def __init__(self, game_state):
+        self.game_state = game_state
+
+    def get_display_list(self, observer_id: int) -> List[PlayerListEntry]:
+        """Get player list for specific observer"""
+        entries = []
+        for player in self.game_state.players:
+            entry = PlayerListEntry(
+                player_id=player.player_id,
+                position=player.position,
+                name=player.name,
+                is_alive=player.is_alive
+            )
+
+            # Reveal role if dead or revealed
+            if not player.is_alive or player.revealed:
+                entry.role = player.role
+
+            # Add status indicators
+            if not player.is_alive:
+                entry.status_indicators.append("dead")
+            if player.is_on_trial:
+                entry.status_indicators.append("on_trial")
+            if player.role == "Mayor" and player.revealed:
+                entry.status_indicators.append("mayor_revealed")
+
+            entries.append(entry)
+
+        return sorted(entries, key=lambda e: e.position)
+```

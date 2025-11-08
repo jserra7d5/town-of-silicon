@@ -1,0 +1,335 @@
+FILENAME: ai_context_management_spec.txt
+
+SYSTEM: AI Context Management
+
+DEPENDENCIES:
+- Role Assignment System (AI's role and faction info)
+- All game systems (for building AI context)
+- Pydantic AI (for LLM context window management)
+
+DATA STRUCTURES:
+
+AIContext:
+  - player_id: int
+  - role: str
+  - faction: str
+  - night_number: int
+  - day_number: int
+  - phase: PhaseType
+  - known_information: KnownInformation
+  - memory: AIMemory
+  - objectives: List[str]
+  - context_summary: str
+
+KnownInformation:
+  - own_role: RoleInfo
+  - faction_members: List[PlayerInfo] (Mafia can see other Mafia)
+  - revealed_roles: Dict[int, str] (dead players, revealed Mayor)
+  - investigation_results: List[InvestigationRecord]
+  - observed_events: List[GameEvent]
+  - chat_history: List[ChatMessage] (summarized if too long)
+  - whisper_history: List[WhisperMessage]
+  - vote_history: List[VoteRecord]
+  - will_content: str
+
+AIMemory:
+  - suspicion_levels: Dict[int, float] (0.0-1.0 for each player)
+  - role_claims: Dict[int, str] (who claimed what role)
+  - behavioral_notes: Dict[int, List[str]]
+  - important_events: List[str]
+  - strategy_state: Dict[str, Any]
+
+PlayerInfo:
+  - player_id: int
+  - name: str
+  - role: str | null
+  - is_alive: bool
+  - revealed: bool
+
+InvestigationRecord:
+  - night: int
+  - target_id: int
+  - result: str
+  - investigator_role: str
+
+ContextWindow:
+  - max_tokens: int (e.g., 8000 for local models, 128k for GPT-4)
+  - current_tokens: int
+  - system_prompt: str
+  - recent_messages: List[Message] (truncated to fit)
+  - summarized_history: str
+
+LLMConfig:
+  - provider: "local" | "openrouter"
+  - model_name: str
+  - endpoint: str | null (for local)
+  - api_key: str | null (for OpenRouter)
+  - max_tokens: int
+  - temperature: float
+  - timeout: int
+
+CONTEXT BUILDING:
+
+System Prompt Template:
+```
+You are playing Town of Salem as a {role} ({faction}).
+
+WIN CONDITION:
+{role_specific_win_condition}
+
+YOUR ABILITIES:
+{role_abilities_description}
+
+CURRENT SITUATION:
+- Night {night_number}, Day {day_number}
+- {living_count} players alive
+- Current phase: {phase}
+
+KNOWN INFORMATION:
+{faction_members_if_mafia}
+{revealed_roles}
+{investigation_results}
+
+OBJECTIVES:
+{current_objectives}
+
+INSTRUCTIONS:
+{phase_specific_instructions}
+```
+
+Context Prioritization (when approaching token limit):
+1. System prompt (always included)
+2. Current phase and game state (always included)
+3. Own role and abilities (always included)
+4. Faction member info (if Mafia - always included)
+5. Recent chat (last 20 messages, full)
+6. Investigation results (all, summarized if needed)
+7. Revealed roles (all)
+8. Older chat (summarized)
+9. Vote history (summarized)
+
+Context Summarization:
+- Use LLM to summarize old chat:
+  "Summarize these chat messages in 100 words: {messages}"
+- Keep structured data (investigation results) in full
+- Summarize behavioral notes periodically
+
+LOGIC FLOW:
+
+1. AI Context Initialization (Game Start):
+   - Create AIContext for each AI player
+   - Set role, faction, objectives
+   - Initialize empty memory
+
+2. Context Update (Each Phase):
+   - Update phase, night/day numbers
+   - Add new events to known_information
+   - Update memory based on observations
+
+3. Context Window Preparation (Before LLM Call):
+   - Build system prompt
+   - Add known information
+   - Add recent messages
+   - Calculate token count
+   - If exceeds limit:
+     * Summarize older content
+     * Truncate low-priority info
+     * Ensure critical info remains
+
+4. Pydantic AI Integration:
+   ```python
+   from pydantic_ai import Agent
+
+   # Create agent for AI player
+   agent = Agent(
+       model='openai:gpt-4o',  # or local model
+       system_prompt=build_system_prompt(ai_context),
+       deps_type=AIContext
+   )
+
+   # Run agent with current context
+   result = await agent.run(
+       user_prompt=phase_specific_prompt,
+       deps=ai_context
+   )
+   ```
+
+5. Information Isolation:
+   - AI only sees what their role would know
+   - Mafia sees other Mafia members
+   - All else is hidden unless revealed/investigated
+   - Dead AI can see all (in graveyard chat) but cannot influence game
+
+6. Memory Updates:
+   - After chat: Update suspicion levels based on messages
+   - After votes: Record voting patterns
+   - After deaths: Update revealed roles, analyze causes
+   - After investigations: Store results, update suspicions
+
+LLM PROVIDER CONFIGURATION:
+
+Local LLM (via Groq):
+```python
+llm_config = LLMConfig(
+    provider="local",
+    model_name="llama-3.1-70b",  # or other 20B+ model
+    endpoint="http://localhost:11434/v1/chat/completions",
+    max_tokens=8192,
+    temperature=0.7,
+    timeout=30
+)
+```
+
+OpenRouter:
+```python
+llm_config = LLMConfig(
+    provider="openrouter",
+    model_name="anthropic/claude-3.5-sonnet",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+    max_tokens=8192,
+    temperature=0.7,
+    timeout=30
+)
+```
+
+Pydantic AI Setup:
+```python
+# Automatically handles context window management
+agent = Agent(
+    model=f'{llm_config.provider}:{llm_config.model_name}',
+    system_prompt=system_prompt
+)
+```
+
+CONTEXT ISOLATION RULES:
+
+Mafia:
+  - Can see: All Mafia members and their roles
+  - Can see: Mafia chat
+  - Cannot see: Town/Neutral private info
+
+Town:
+  - Can see: Only own role
+  - Can see: Publicly revealed info
+  - Can see: Own investigation results
+  - Cannot see: Other players' roles (unless revealed/investigated)
+
+Neutral:
+  - Same as Town (isolated)
+  - Exception: Executioner knows target
+
+Dead Players:
+  - Can see: Graveyard chat
+  - Can see: All game events (spectator mode)
+  - Cannot: Influence living players (except Medium communication)
+
+MEMORY MANAGEMENT:
+
+Suspicion Tracking:
+```python
+def update_suspicion(ai_context, player_id, delta):
+    current = ai_context.memory.suspicion_levels.get(player_id, 0.5)
+    new_value = max(0.0, min(1.0, current + delta))
+    ai_context.memory.suspicion_levels[player_id] = new_value
+```
+
+Behavioral Notes:
+- Record significant actions: "Player 3 voted Player 7 very quickly"
+- Record claims: "Player 5 claimed Sheriff Day 2"
+- Record contradictions: "Player 8 said visited Player 2, but Lookout saw no visitors"
+
+EDGE CASES:
+
+1. Context Window Overflow:
+   - Summarize old chat progressively
+   - Keep last 50 messages in full, summarize older
+   - Always keep investigation results and revealed roles
+
+2. Role Change (Amnesiac, Mafioso→GF):
+   - Update AIContext with new role
+   - Adjust objectives and abilities
+   - Maintain memory
+
+3. LLM Timeout:
+   - Retry once with shorter context
+   - If still fails, use fallback behavior
+
+4. Mafia Member Dies:
+   - Remaining Mafia still see dead Mafia's role
+   - Update Mafia member list
+
+IMPLEMENTATION:
+
+```python
+from pydantic import BaseModel
+from typing import Dict, List, Optional
+from pydantic_ai import Agent
+
+class KnownInformation(BaseModel):
+    own_role: str
+    faction_members: List[int] = []
+    revealed_roles: Dict[int, str] = {}
+    investigation_results: List[Dict] = []
+    observed_events: List[str] = []
+
+class AIMemory(BaseModel):
+    suspicion_levels: Dict[int, float] = {}
+    role_claims: Dict[int, str] = {}
+    behavioral_notes: Dict[int, List[str]] = {}
+
+class AIContext(BaseModel):
+    player_id: int
+    role: str
+    faction: str
+    night_number: int
+    day_number: int
+    known_information: KnownInformation
+    memory: AIMemory
+
+class AIContextManager:
+    def __init__(self, llm_config: LLMConfig):
+        self.contexts: Dict[int, AIContext] = {}
+        self.llm_config = llm_config
+
+    def create_context(self, player_id: int, role: str, faction: str):
+        self.contexts[player_id] = AIContext(
+            player_id=player_id,
+            role=role,
+            faction=faction,
+            night_number=0,
+            day_number=0,
+            known_information=KnownInformation(own_role=role),
+            memory=AIMemory()
+        )
+
+    def build_system_prompt(self, context: AIContext) -> str:
+        return f"""You are playing Town of Salem as a {context.role} ({context.faction}).
+
+Your goal: {self.get_win_condition(context.role)}
+
+Current night: {context.night_number}, Day: {context.day_number}
+
+Known information:
+- Revealed roles: {context.known_information.revealed_roles}
+- Your investigation results: {context.known_information.investigation_results}
+
+Make decisions based on this information."""
+
+    def get_context_for_llm(self, player_id: int) -> AIContext:
+        return self.contexts[player_id]
+```
+
+PERFORMANCE:
+
+- Context building: <50ms
+- Token counting: <10ms
+- Summarization (if needed): <2s
+- Total context prep: <3s (including summarization)
+
+PYDANTIC AI BENEFITS:
+
+- Automatic context window management
+- Structured output parsing
+- Type-safe context handling
+- Built-in retry logic
+- Provider abstraction (local vs. OpenRouter)

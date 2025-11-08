@@ -1,0 +1,365 @@
+FILENAME: role_assignment_system_spec.txt
+
+SYSTEM: Role Assignment System
+
+DEPENDENCIES:
+- None (this is the first system to execute in game initialization)
+
+DATA STRUCTURES:
+
+RoleList:
+  - name: string (e.g., "Classic", "Ranked Practice", "Custom")
+  - slots: RoleSlot[] (array of 15 role slot definitions)
+  - description: string
+
+RoleSlot:
+  - position: int (1-15)
+  - constraint: RoleConstraint
+  - possible_roles: Role[] (computed from constraint)
+
+RoleConstraint:
+  - type: "specific" | "faction" | "category" | "any"
+  - value: string (e.g., "Jailor", "Town Investigative", "Mafia", "Any")
+
+Role:
+  - id: string (unique identifier)
+  - name: string (display name)
+  - faction: "Town" | "Mafia" | "Neutral"
+  - category: string (e.g., "Town Investigative", "Town Killing", "Mafia Deception")
+  - alignment: string (e.g., "Town Investigative", "Mafia Killing")
+  - attack: int (0=none, 1=basic, 2=powerful, 3=unstoppable)
+  - defense: int (0=none, 1=basic, 2=powerful, 3=invincible)
+  - unique: bool (can only be assigned once per game)
+  - abilities: RoleAbility[]
+  - immunities: string[] (e.g., "roleblock", "detection", "control")
+
+RoleAbility:
+  - name: string
+  - description: string
+  - cooldown: int (nights between uses, 0=no cooldown)
+  - max_uses: int | null (null=unlimited)
+  - priority: int (for night action resolution order)
+
+PlayerRoleAssignment:
+  - player_id: int (1-15)
+  - role: Role
+  - faction: string
+  - is_human: bool
+
+GameRoleList:
+  - template: RoleList
+  - assignments: PlayerRoleAssignment[]
+  - seed: int (for reproducibility)
+
+ROLE DEFINITIONS:
+
+TOWN ROLES:
+  Town Investigative:
+    - Sheriff: Interrogate for suspicious behavior. Cannot find Godfathers or Amnesiacs.
+    - Investigator: Investigate for exact role. Returns set of 3 possible roles.
+    - Lookout: Watch a player at night. See who visits them.
+    - Spy: Bug a player's house. See who Mafia/Coven visit and mafia chat.
+
+  Town Killing:
+    - Jailor: Choose a player to jail. Jail protects and roleblocks. Can execute jailed player.
+    - Veteran: Go on alert. Kill all visitors (3 uses).
+    - Vigilante: Shoot a player (3 bullets). If you shoot town, you commit suicide next night.
+    - Vampire Hunter: Check for vampires. Become vigilante if all vampires dead.
+
+  Town Protective:
+    - Doctor: Heal a player. Give them basic defense. Cure poison.
+    - Bodyguard: Protect a player. Counterattack one attacker. You may die (1 self-heal).
+    - Crusader: Protect a player. Attack one random visitor (basic attack).
+
+  Town Support:
+    - Escort: Distract a player. Roleblock them.
+    - Mayor: Reveal yourself (permanent). Your vote counts as 3. Cannot be healed.
+    - Medium: Speak with the dead at night. Seance a player once per game.
+    - Retributionist: Raise a dead town member to use their ability once.
+    - Transporter: Swap two players' positions. All actions on one affect the other.
+
+MAFIA ROLES:
+  Mafia Killing:
+    - Godfather: Kill a player each night. Appear innocent to Sheriff. Basic defense. Unique.
+    - Mafioso: Carry out the Godfather's orders. Become Godfather if GF dies.
+    - Ambusher: Lie in wait outside a house. Attack one visitor (2 uses).
+
+  Mafia Deception:
+    - Disguiser: Disguise as a player. Appear as their role if you die.
+    - Forger: Forge a will. Rewrite a player's will (3 uses).
+    - Framer: Frame a player. They appear suspicious to Sheriff.
+    - Hypnotist: Hypnotize a player. Give them false feedback.
+    - Janitor: Clean up a kill. Hide role and will from town (3 uses).
+
+  Mafia Support:
+    - Blackmailer: Blackmail a player. Prevent them from speaking. See whispers.
+    - Consigliere: Investigate a player. Learn their exact role.
+    - Consort: Distract a player. Roleblock them. Basic defense.
+
+NEUTRAL ROLES:
+  Neutral Killing:
+    - Serial Killer: Kill a player each night. Kills roleblocking visitors. Basic defense.
+    - Arsonist: Douse in gasoline or ignite. Ignite kills all doused. Basic defense.
+    - Werewolf: Transform on full moon nights. Attack target and visitors. Basic defense.
+
+  Neutral Evil:
+    - Jester: Get yourself lynched. If lynched, haunt and kill one guilty voter.
+    - Executioner: Lynch your target. Target is guaranteed town (not Jailor/Mayor). Become Jester if target dies.
+    - Witch: Control a player. Force them to target another player. Basic defense.
+
+  Neutral Benign:
+    - Survivor: Stay alive. Vest gives basic defense (4 uses). Win with anyone.
+    - Amnesiac: Remember a role. Become the role of a dead player.
+    - Guardian Angel: Protect your target. Give them powerful defense (2 uses). Vest yourself (2 uses).
+
+ROLE LISTS:
+
+Classic Mode (15 players):
+  Slot 1: Jailor (specific)
+  Slot 2: Town Investigative
+  Slot 3: Town Killing
+  Slot 4: Town Protective
+  Slot 5: Town Support
+  Slot 6: Town Support
+  Slot 7: Random Town
+  Slot 8: Random Town
+  Slot 9: Random Town
+  Slot 10: Godfather (specific)
+  Slot 11: Mafioso (specific)
+  Slot 12: Random Mafia
+  Slot 13: Neutral Evil
+  Slot 14: Neutral Killing
+  Slot 15: Any
+
+Ranked Practice (15 players):
+  Slot 1: Jailor (specific)
+  Slot 2: Town Investigative
+  Slot 3: Town Killing
+  Slot 4: Town Protective
+  Slot 5: Town Support
+  Slot 6: Random Town
+  Slot 7: Random Town
+  Slot 8: Random Town
+  Slot 9: Random Town
+  Slot 10: Godfather (specific)
+  Slot 11: Mafioso (specific)
+  Slot 12: Random Mafia
+  Slot 13: Neutral Killing
+  Slot 14: Neutral Evil
+  Slot 15: Neutral Benign
+
+LOGIC FLOW:
+
+1. Game Initialization:
+   a. Load selected RoleList template (Classic, Ranked, or Custom)
+   b. Generate random seed for reproducibility
+   c. Create array of 15 empty PlayerRoleAssignment objects
+
+2. Role Pool Generation:
+   For each RoleSlot in the template:
+   a. Evaluate the constraint type
+   b. Build possible_roles array based on constraint:
+      - "specific": Single role (e.g., ["Jailor"])
+      - "faction": All roles in faction (e.g., ["Sheriff", "Investigator", "Lookout", "Spy"] for Town Investigative)
+      - "category": All roles in category (e.g., all Town roles for "Random Town")
+      - "any": All non-unique roles not yet assigned
+
+3. Unique Role Constraint:
+   a. Maintain a set of assigned_unique_roles
+   b. When selecting from possible_roles, filter out any role in assigned_unique_roles
+   c. After assigning a unique role, add it to assigned_unique_roles
+
+4. Role Assignment Algorithm:
+   a. Process slots in order (1-15)
+   b. For each slot:
+      i. Get possible_roles list for this slot
+      ii. Filter out already-assigned unique roles
+      iii. Randomly select one role from filtered list
+      iv. Assign role to player at this position
+      v. If role is unique, mark it as assigned
+
+5. Faction Balance Validation:
+   After assignment, verify:
+   a. Minimum 1 Mafia member exists
+   b. Majority (8+) are not Mafia/NK/NE (game should be winnable for town)
+   c. If validation fails, regenerate assignments (max 10 attempts)
+
+6. Human Player Position:
+   a. Randomly select position 1-15 for human player
+   b. OR allow player to choose position (dev/testing mode)
+   c. Mark assignment at that position as is_human=true
+
+7. Assignment Finalization:
+   a. Create PlayerRoleAssignment for each player
+   b. Store assignments in GameState
+   c. Send role information to AI Context Management System
+   d. Display role card to human player
+
+UI REQUIREMENTS:
+
+Pre-Game:
+  - Role List Selection dropdown (Classic, Ranked Practice, Custom)
+  - "Start Game" button
+  - Role List preview showing 15 slots with constraints
+  - Hover tooltip on each slot showing possible roles
+
+Game Start:
+  - Fade in/transition effect
+  - Display "You are the [Role Name]" message
+  - Show role card with:
+    * Role name (large, colored by faction)
+    * Alignment description
+    * Ability description
+    * Attack/Defense values
+    * Immunities
+    * Special notes/tips
+  - "Continue" button to proceed to Day 1
+
+Role Card (persistent UI element):
+  - Clickable icon to expand/collapse role card
+  - Shows your current role information
+  - Updates if role changes (Amnesiac, Retributionist use, etc.)
+
+AI BEHAVIOR:
+
+AI agents do not make decisions during role assignment. However:
+  - Each AI receives their role assignment
+  - AI Context Management receives faction information:
+    * Mafia members can see other Mafia members' roles
+    * All other roles start with no knowledge of other players
+  - AI loads role-specific behavior patterns:
+    * Aggressive vs. cautious play style
+    * Claiming strategy (when to claim, what to claim)
+    * Voting patterns
+    * Communication style
+
+VALIDATION RULES:
+
+1. Slot Count Validation:
+   - RoleList must have exactly 15 slots
+   - Each slot must have valid constraint
+
+2. Constraint Validation:
+   - "specific" constraints must reference valid role name
+   - "faction" constraints must reference valid category
+   - "any" slots processed last to ensure unique roles available
+
+3. Role Assignment Validation:
+   - Each player assigned exactly one role
+   - No duplicate unique roles
+   - All 15 positions filled
+
+4. Faction Balance Validation:
+   - At least 1 Mafia member
+   - At most 5 Mafia members (prevents auto-loss for town)
+   - At least 7 Town members (ensures winnable game)
+   - At most 2 Neutral Killing roles
+
+5. Unique Role Validation:
+   - Godfather: max 1
+   - Jailor: max 1
+   - Mayor: max 1
+   - Veteran: max 1
+   - Retributionist: max 1
+   - Each Unique=true role: max 1
+
+EDGE CASES:
+
+1. Impossible Role List:
+   - If constraints make valid assignment impossible (e.g., 5 slots require Jailor)
+   - Error: Display error message and prevent game start
+   - Solution: Validate RoleList on selection, show warning
+
+2. Custom Role List:
+   - Allow users to create custom role lists
+   - Validate balance before allowing game start
+   - Show warnings for potentially unbalanced lists
+
+3. Role Change During Game:
+   - Amnesiac remembers a role
+   - Mafioso becomes Godfather
+   - Executioner becomes Jester
+   - Solution: Update PlayerRoleAssignment and notify affected systems
+
+4. Target Assignment for Executioner/Guardian Angel:
+   - Executioner needs a Town target (not Jailor/Mayor)
+   - Guardian Angel needs a target (Town or Neutral)
+   - Assign after all roles determined
+   - Ensure target is valid for role objective
+
+5. Regeneration Limit:
+   - If assignment algorithm fails after 10 attempts
+   - Error: "Unable to generate balanced game with this role list"
+   - Solution: Modify RoleList or use different seed
+
+6. Mid-Game Role Lookup:
+   - System needs to look up role by name or category
+   - Maintain role registry with indexed access
+   - Cache computed role sets (e.g., all_town_roles)
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from enum import Enum
+from typing import List, Optional, Literal
+
+class FactionType(str, Enum):
+    TOWN = "Town"
+    MAFIA = "Mafia"
+    NEUTRAL = "Neutral"
+
+class RoleAbility(BaseModel):
+    name: str
+    description: str
+    cooldown: int = 0
+    max_uses: Optional[int] = None
+    priority: int
+
+class Role(BaseModel):
+    id: str
+    name: str
+    faction: FactionType
+    category: str
+    alignment: str
+    attack: int = Field(ge=0, le=3)
+    defense: int = Field(ge=0, le=4)
+    unique: bool = False
+    abilities: List[RoleAbility]
+    immunities: List[str] = []
+
+class RoleConstraint(BaseModel):
+    type: Literal["specific", "faction", "category", "any"]
+    value: str
+
+class RoleSlot(BaseModel):
+    position: int = Field(ge=1, le=15)
+    constraint: RoleConstraint
+
+class RoleList(BaseModel):
+    name: str
+    slots: List[RoleSlot]
+    description: str
+
+class PlayerRoleAssignment(BaseModel):
+    player_id: int = Field(ge=1, le=15)
+    role: Role
+    faction: str
+    is_human: bool = False
+
+class RoleAssignmentSystem:
+    def assign_roles(self, role_list: RoleList, seed: int) -> List[PlayerRoleAssignment]:
+        # Implementation here
+        pass
+```
+
+Random Seed Usage:
+  - Use seed for deterministic random generation
+  - Allows replaying games with same role distribution
+  - Store seed in game history/logs
+
+Performance:
+  - Role assignment should complete in <100ms
+  - Precompute role pools on RoleList load
+  - Cache category lookups

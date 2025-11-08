@@ -1,0 +1,307 @@
+FILENAME: game_settings_spec.txt
+
+SYSTEM: Game Settings
+
+DEPENDENCIES:
+- Role Assignment System (role list configuration)
+- Phase Management System (time limits)
+- AI Context Management (LLM configuration)
+
+SETTINGS CATEGORIES:
+
+GameModeSettings:
+  - mode: "Classic" | "Ranked Practice" | "Custom"
+  - role_list: RoleList
+  - player_position: int (1-15, or "Random")
+
+TimingSettings:
+  - day_discussion_duration: int (default 45s)
+  - voting_duration: int (default 30s)
+  - defense_duration: int (default 20s)
+  - judgment_duration: int (default 20s)
+  - night_duration: int (default 30s)
+  - allow_ai_extensions: bool (default true)
+  - max_extensions: int (default 3)
+
+AISettings:
+  - llm_provider: "local" | "openrouter"
+  - model_name: str
+  - endpoint: str | null
+  - api_key: str | null
+  - temperature: float (0.0-2.0, default 0.7)
+  - max_tokens: int (default 8192)
+  - timeout: int (default 30s)
+
+UISettings:
+  - theme: "dark" | "light"
+  - font_size: "small" | "medium" | "large"
+  - colorblind_mode: bool
+  - show_animations: bool
+  - sound_effects: bool
+  - notification_style: "modal" | "banner"
+
+AccessibilitySettings:
+  - screen_reader_support: bool
+  - high_contrast: bool
+  - keyboard_only_mode: bool
+  - message_delay: int (for screen readers)
+
+SETTINGS UI:
+
+Main Menu → Settings:
+```
+┌──────────────────────────────┐
+│ GAME SETTINGS                │
+├──────────────────────────────┤
+│ [Game Mode]                  │
+│ [Timing]                     │
+│ [AI Configuration]           │
+│ [User Interface]             │
+│ [Accessibility]              │
+│                              │
+│ [Save] [Cancel] [Defaults]   │
+└──────────────────────────────┘
+```
+
+Game Mode Settings:
+```
+┌──────────────────────────────┐
+│ GAME MODE                    │
+├──────────────────────────────┤
+│ Mode: [ Classic ▼]           │
+│  - Classic (recommended)     │
+│  - Ranked Practice           │
+│  - Custom                    │
+│                              │
+│ Your Position: [Random ▼]   │
+│  - Random                    │
+│  - Position 1-15             │
+│                              │
+│ Role List Preview:           │
+│  1. Jailor                   │
+│  2. Town Investigative       │
+│  ...                         │
+│                              │
+│ [Edit Custom Role List]      │
+└──────────────────────────────┘
+```
+
+AI Configuration:
+```
+┌──────────────────────────────┐
+│ AI CONFIGURATION             │
+├──────────────────────────────┤
+│ Provider: [● Local  ○ OpenRouter] │
+│                              │
+│ Local Settings:              │
+│ Model: [llama-3.1-70b ▼]     │
+│ Endpoint: [localhost:11434]  │
+│                              │
+│ OpenRouter Settings:         │
+│ API Key: [**************]    │
+│ Model: [claude-3.5-sonnet ▼] │
+│                              │
+│ Advanced:                    │
+│ Temperature: [0.7] (0-2)     │
+│ Max Tokens: [8192]           │
+│ Timeout: [30]s               │
+│                              │
+│ [Test Connection]            │
+└──────────────────────────────┘
+```
+
+Timing Settings:
+```
+┌──────────────────────────────┐
+│ TIMING                       │
+├──────────────────────────────┤
+│ Day Discussion:   [45]s      │
+│ Voting Phase:     [30]s      │
+│ Defense:          [20]s      │
+│ Judgment:         [20]s      │
+│ Night:            [30]s      │
+│                              │
+│ [✓] Allow AI time extensions │
+│ Max Extensions: [3]          │
+│                              │
+│ [Presets: ▼]                 │
+│  - Default                   │
+│  - Quick Game (50% time)     │
+│  - Extended (150% time)      │
+│                              │
+└──────────────────────────────┘
+```
+
+CUSTOM ROLE LIST EDITOR:
+```
+┌─────────────────────────────────────┐
+│ CUSTOM ROLE LIST EDITOR             │
+├─────────────────────────────────────┤
+│ Slot 1:  [Jailor ▼]                 │
+│ Slot 2:  [Town Investigative ▼]     │
+│ Slot 3:  [Town Killing ▼]           │
+│ ...                                 │
+│ Slot 15: [Any ▼]                    │
+│                                     │
+│ Balance Check:                      │
+│ ✓ At least 7 Town                   │
+│ ✓ At least 1 Mafia                  │
+│ ✓ At most 5 Mafia                   │
+│ ✓ No duplicate unique roles         │
+│                                     │
+│ [Validate] [Save] [Cancel]          │
+└─────────────────────────────────────┘
+```
+
+PRESETS:
+
+Default (Recommended):
+  - Classic mode
+  - Standard timing
+  - Local LLM
+  - Dark theme
+
+Quick Game:
+  - Classic mode
+  - 50% time reduction
+  - All timers halved
+  - For experienced players
+
+Extended Game:
+  - Classic mode
+  - 150% time increase
+  - For thorough discussions
+
+Beginner Friendly:
+  - Classic mode
+  - 200% time increase
+  - Helpful tooltips enabled
+  - Slower pace
+
+VALIDATION:
+
+Role List Validation:
+  - Must have exactly 15 slots
+  - At least 7 Town roles (winnable for Town)
+  - At least 1 Mafia role
+  - At most 5 Mafia roles
+  - No duplicate unique roles (max 1 Jailor, 1 Mayor, etc.)
+
+Timing Validation:
+  - All times must be > 0
+  - Recommended minimums:
+    * Day: 20s min
+    * Night: 15s min
+    * Defense: 10s min
+    * Judgment: 10s min
+
+AI Configuration Validation:
+  - If local: Test endpoint connectivity
+  - If OpenRouter: Validate API key
+  - Model name must be recognized
+
+SETTINGS PERSISTENCE:
+
+Save Location:
+  - Local storage (browser)
+  - Or config file (desktop app)
+  - JSON format
+
+Auto-Save:
+  - Save on change
+  - No explicit save needed for minor settings
+  - Confirm for major changes (role list)
+
+Reset to Defaults:
+  - "Reset to Defaults" button
+  - Confirmation dialog
+  - Restores all factory settings
+
+IMPLEMENTATION:
+
+Settings State:
+```python
+from pydantic import BaseModel
+
+class GameSettings(BaseModel):
+    mode: str = "Classic"
+    role_list_name: str = "Classic"
+    player_position: int | str = "Random"
+
+    day_discussion_duration: int = 45
+    voting_duration: int = 30
+    defense_duration: int = 20
+    judgment_duration: int = 20
+    night_duration: int = 30
+    allow_ai_extensions: bool = True
+
+    llm_provider: str = "local"
+    llm_model: str = "llama-3.1-70b"
+    llm_endpoint: str = "http://localhost:11434/v1/chat/completions"
+    llm_temperature: float = 0.7
+    llm_timeout: int = 30
+
+    theme: str = "dark"
+    font_size: str = "medium"
+    colorblind_mode: bool = False
+    sound_effects: bool = True
+
+    @classmethod
+    def load_from_file(cls, path: str):
+        with open(path, 'r') as f:
+            data = json.load(f)
+        return cls(**data)
+
+    def save_to_file(self, path: str):
+        with open(path, 'w') as f:
+            json.dump(self.dict(), f, indent=2)
+```
+
+Settings Manager:
+```python
+class SettingsManager:
+    def __init__(self):
+        self.settings = GameSettings.load_from_file("settings.json")
+
+    def update_setting(self, key: str, value: Any):
+        setattr(self.settings, key, value)
+        self.settings.save_to_file("settings.json")
+
+    def validate_role_list(self, role_list: RoleList) -> List[str]:
+        errors = []
+        town_count = sum(1 for slot in role_list.slots if "Town" in slot.constraint.value)
+
+        if town_count < 7:
+            errors.append("At least 7 Town roles required")
+
+        return errors
+
+    def test_llm_connection(self) -> bool:
+        if self.settings.llm_provider == "local":
+            try:
+                response = requests.get(self.settings.llm_endpoint, timeout=5)
+                return response.status_code == 200
+            except:
+                return False
+        elif self.settings.llm_provider == "openrouter":
+            # Test API key
+            return self.validate_api_key(self.settings.llm_api_key)
+```
+
+EDGE CASES:
+
+1. Invalid Settings File:
+   - Use defaults if file corrupt
+   - Show warning to user
+
+2. LLM Endpoint Unreachable:
+   - Show error in settings
+   - Prevent game start until fixed
+
+3. Extreme Timing Values:
+   - Clamp to reasonable range
+   - Warn if too fast or too slow
+
+4. Custom Role List Unbalanced:
+   - Show warnings (not errors)
+   - Allow anyway (user's choice)

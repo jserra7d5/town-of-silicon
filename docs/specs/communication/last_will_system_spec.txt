@@ -1,0 +1,487 @@
+FILENAME: last_will_system_spec.txt
+
+SYSTEM: Last Will System
+
+DEPENDENCIES:
+- Death System (wills displayed on death)
+- Role Assignment System (some roles interact with wills)
+- Phase Management System (will editing allowed at specific times)
+
+DATA STRUCTURES:
+
+LastWill:
+  - player_id: int
+  - content: str (max 200 characters)
+  - last_edited: datetime
+  - edit_count: int (track number of edits)
+  - is_forged: bool (true if Forger modified it)
+  - original_content: str | null (if forged, stores original)
+  - forger_id: int | null (who forged it)
+
+WillTemplate:
+  - name: str (template name, e.g., "Sheriff Template")
+  - content: str (pre-filled will text)
+  - role: str (which role this template is for)
+
+ForgerAction:
+  - forger_id: int
+  - target_id: int
+  - forged_content: str (what to replace will with)
+  - night_used: int
+  - uses_remaining: int (Forger has 3 uses)
+
+WILL MECHANICS:
+
+Will Editing:
+  - Players can edit their will at any time while alive
+  - Will has max 200 character limit
+  - Will is saved automatically (no manual save button needed)
+  - Will persists across phases
+
+Will Display on Death:
+  - When player dies, their will is displayed to all players
+  - Format: "{PlayerName}'s Last Will" followed by will content
+  - If no will written: Display "No will left."
+  - If will empty (only whitespace): Display "No will left."
+
+Forger Ability:
+  - Forger can replace a player's will at night
+  - Forger has 3 uses total (forges 3 wills max)
+  - Forger selects target and types replacement will
+  - When target dies, forged will is shown instead of original
+  - Original will is lost (Town never sees it)
+  - Forger and Mafia see original will in Mafia chat
+
+Janitor Interaction:
+  - If Janitor cleans a body, will is NOT displayed
+  - Cleaned death shows: "We could not determine their role" and no will
+  - Will is still stored (if player is resurrected, will returns)
+
+Strategic Use:
+  - Town roles list investigation results, observations
+  - Example Sheriff will: "N1: Checked John - NS. N2: Checked Sarah - Sus! N3: Checked..."
+  - Town roles claim their role in will for confirmation after death
+  - Mafia roles may fake claim in will to confuse Town
+  - Executioner lists false info to frame target
+
+LOGIC FLOW:
+
+1. Will Initialization:
+   a. When game starts, create LastWill object for each player
+   b. Initialize with empty content ("")
+   c. Optionally offer role-based templates:
+      - "Would you like to use the {Role} template for your will?"
+      - Templates pre-fill useful format (e.g., "N1: ... N2: ... N3: ...")
+
+2. Will Editing (Human Player):
+   a. Player clicks "Edit Will" button (accessible from role card or dedicated tab)
+   b. Will editor opens (text area, 200 char limit)
+   c. Show current will content
+   d. Player types/edits will
+   e. Character counter updates: "150/200"
+   f. Auto-save on every keystroke (or after 1 second delay)
+   g. Show "Will saved" indicator
+   h. Player can close editor or leave it open
+
+3. Will Editing (AI Player):
+   a. AI updates will after key events:
+      - After each night (add investigation results)
+      - After role changes (update role claim)
+      - After gathering important information
+   b. AI generates will content using LLM:
+      - Prompt: "Update your will as {Role}. Include {information}"
+      - Max 200 chars
+   c. AI simulates realistic editing:
+      - Don't update will every single night (60-80% of nights)
+      - Add progressive information (N1, N2, N3)
+      - Maintain consistent format
+
+4. Will Display on Death:
+   a. Player dies (lynched or killed at night)
+   b. Death System retrieves player.last_will
+   c. Check if will is forged:
+      - If is_forged==true: Use forged content
+      - Else: Use original content
+   d. Check if death is cleaned:
+      - If cleaned==true: Don't display will
+      - Else: Display will
+   e. Format will display:
+      - Header: "{PlayerName}'s Last Will"
+      - Content: will text (or "No will left" if empty)
+      - Border/background to distinguish from other text
+   f. Show to all players in death announcement
+
+5. Forger Action (Night Phase):
+   a. Forger selects "Forge Will" ability
+   b. Forger selects target player
+   c. Forger opens will editor:
+      - Text area (max 200 chars)
+      - Placeholder: "Enter forged will content..."
+      - Show target's current will (Forger can see it)
+   d. Forger types forged will
+   e. Forger submits night action
+   f. When target dies:
+      - Set target.last_will.is_forged = true
+      - Set target.last_will.original_content = original will
+      - Set target.last_will.content = forged content
+      - Set target.last_will.forger_id = forger ID
+   g. Decrement forger.uses_remaining
+
+6. Forger Strategic Use (AI):
+   a. AI Forger identifies important targets:
+      - Investigative roles (Sheriff, Investigator, Lookout)
+      - Players who likely have damaging info in will
+   b. AI decides when to forge:
+      - Same night Mafia kills target (so will is displayed)
+      - When target has revealed useful info
+   c. AI generates forged will:
+      - Prompt: "Create a fake will for {target} to mislead Town"
+      - Options:
+        * Blank will (hide information)
+        * Fake claim (frame someone else)
+        * Contradictory info (confuse Town)
+   d. AI Forger may discuss in Mafia chat:
+      - "I'm forging John's will tonight"
+      - "I saw John's will, he has me as sus - forging it"
+
+7. Will Templates:
+   a. Offer templates based on player's role:
+      - Sheriff: "Night 1: \nNight 2: \nNight 3: "
+      - Investigator: "N1: \nN2: \nN3: "
+      - Doctor: "N1: Protected \nN2: Protected "
+      - Generic: "I am the {Role}."
+   b. Player can accept template or start from blank
+   c. AI players use templates 70% of the time
+
+8. Will Validation:
+   a. Check length <= 200 characters
+   b. Sanitize content (remove HTML/scripts)
+   c. Allow line breaks (display with line breaks intact)
+   d. Trim excess whitespace
+
+9. Will Persistence:
+   a. Save will to game state every time edited
+   b. If player disconnects and reconnects, will is preserved
+   c. Will is part of PlayerState object
+
+10. Post-Game Will Review:
+    a. After game ends, show all players' wills
+    b. Include both original and forged versions (if applicable)
+    c. Reveal which wills were forged
+    d. Useful for learning and analysis
+
+UI REQUIREMENTS:
+
+Will Editor:
+  - Accessible via button: "📄 Edit Will"
+  - Opens in modal or side panel
+  - Components:
+    * Header: "Your Last Will"
+    * Text area: Multiline, 200 char max
+    * Character counter: "X/200" (red if over limit)
+    * Template button: "Use Template" (dropdown with options)
+    * Save indicator: "✓ Saved" (auto-save)
+    * Close button
+  - Resizable text area (optional)
+  - Font: Monospace (for alignment of N1, N2, etc.)
+
+Will Display (On Death):
+  - Container: Bordered box, distinct background (parchment style)
+  - Header: "{PlayerName}'s Last Will" (bold, larger font)
+  - Content:
+    * Will text (preserve line breaks)
+    * Monospace font for readability
+    * "No will left." if empty (italic, gray)
+  - Size: Fit to content, max height with scroll if very long
+  - Position: In death announcement panel
+
+Forger Will Editor:
+  - Similar to regular will editor
+  - Header: "Forge {TargetName}'s Will"
+  - Show target's current will above editor:
+    * "Current will: {content}"
+    * Grayed out, read-only
+  - Editor for forged content
+  - Warning: "Uses remaining: {X}/3"
+  - Submit button: "Forge Will"
+
+Will Templates Dropdown:
+  - Dropdown menu with template options:
+    * "Blank" (empty)
+    * "{Role} Template" (role-specific)
+    * "Simple Claim" (just "I am the {Role}")
+  - Preview template on hover
+  - Click to apply (replaces current will)
+
+Will Save Indicator:
+  - Shows "Saving..." while typing
+  - Shows "✓ Saved" after 1 second of inactivity
+  - Green checkmark icon
+
+Will Access Button:
+  - Always visible button in UI:
+    * "📄 Will" in toolbar
+    * Or in role card panel
+  - Badge shows "!" if will is empty (reminder to fill it out)
+
+Post-Game Will Display:
+  - List all players with their wills
+  - Format:
+    * Player name | Role | Will content
+    * If forged: Show "Original: {original}" and "Forged: {forged}"
+  - Sortable by player number, role, faction
+  - Exportable (copy all wills to clipboard)
+
+AI BEHAVIOR:
+
+AI Will Strategy (Town Roles):
+  - Investigative roles (Sheriff, Investigator, Lookout):
+    * Record nightly results
+    * Format: "N1: Checked John - Not Sus. N2: Checked Sarah - Suspicious!"
+    * Update will each morning after results
+  - Protective roles (Doctor, Bodyguard):
+    * Record who they protected
+    * "N1: Protected Mayor. N2: Protected Jailor."
+  - Jailor:
+    * Record who they jailed and interrogation notes
+    * "N1: Jailed Player 3 - claimed Doctor. N2: Jailed Player 7 - suspicious, executed."
+  - Town Support (Escort, Transporter):
+    * Record actions and observations
+    * "N1: Escorted Player 5. N2: Transported 3 and 7."
+
+AI Will Strategy (Mafia Roles):
+  - Fake claims in will:
+    * Claim Sheriff: "N1: Player 8 - NS. N2: Player 12 - NS."
+    * Claim Doctor: "N1: Healed Player 4. N2: Healed Player 9."
+  - Make fake claims believable:
+    * Use realistic format (match Town will styles)
+    * Include plausible results
+    * Don't claim checking dead Mafia members as suspicious
+
+AI Will Strategy (Neutral Roles):
+  - Executioner:
+    * Frame target in will: "N1: Saw Player {target} visit victim's house!"
+    * Claim investigative role
+  - Jester:
+    * Write confusing or suspicious will to get lynched
+    * Claim evil role: "I am the Godfather"
+    * Or leave blank (suspicious)
+  - Survivor:
+    * Claim Survivor honestly (risky)
+    * Or fake claim Town role
+
+AI Will Update Timing:
+  - After each night: 60-80% chance AI updates will
+  - After important events: 90% chance (e.g., found Mafia member)
+  - Don't update every single night (realistic)
+
+AI Will Content Generation:
+  - Use LLM to generate will updates:
+    * Prompt: "You are a {role}. Update your will with {new_info}. Keep it under 200 chars. Current will: {current_will}"
+    * Response: Updated will content
+  - Append to existing will (progressive updates)
+  - Maintain consistent format throughout game
+
+AI Forger Decision:
+  - Forger identifies high-value targets:
+    * Sheriff who found Mafia member
+    * Investigator with important results
+    * Jailor who executed Mafia
+  - Forger uses limited uses strategically (only 3)
+  - Forger generates forged content:
+    * Option 1: Blank will (hide info)
+    * Option 2: Fake results (frame someone else)
+    * Option 3: Claim different role
+  - LLM prompt: "Generate a forged will for {target} ({target_role}) to mislead Town. Real will: {real_will}"
+
+VALIDATION RULES:
+
+1. Content Validation:
+   - Length: 0-200 characters
+   - Allow empty wills (valid)
+   - Sanitize HTML/scripts (prevent XSS)
+   - Allow line breaks and basic formatting
+
+2. Edit Permission:
+   - Only living players can edit their will
+   - Dead players cannot edit will (locked)
+   - Players can only edit their own will (not others')
+
+3. Forger Validation:
+   - Must be Forger role
+   - Must have uses remaining (max 3)
+   - Target must be valid player (alive, not self)
+   - Forged content must be <= 200 chars
+
+4. Display Validation:
+   - Show forged will if is_forged == true
+   - Don't show will if cleaned == true
+   - Handle null/empty wills gracefully
+
+EDGE CASES:
+
+1. Forger Dies Before Target:
+   - Forger forges target's will, then Forger dies
+   - Target dies later
+   - Solution: Forged will still applies (action was successful)
+
+2. Forger Forges Will, Target Doesn't Die:
+   - Forger uses ability, but target survives whole game
+   - Solution: Forge use is wasted, but counts toward 3 uses
+   - If target dies later, forged will still applies
+
+3. Multiple Forgers (Custom Role List):
+   - Two Forgers forge same target's will
+   - Solution: Last forge wins (overwrites previous)
+   - Both Forgers lose one use
+
+4. Player Edits Will After Being Forged:
+   - Forger forges will Night 2
+   - Target edits will Day 3
+   - Solution: Player's edit overwrites forge (is_forged set to false)
+   - Forge is wasted
+
+5. Janitor Cleans Forged Will:
+   - Forger forges will, Janitor cleans same kill
+   - Solution: Will is not displayed (Janitor overrides Forger)
+   - Forge use is wasted
+   - Mafia sees neither original nor forged will
+
+6. Retributionist Raises Player:
+   - Player dies with will, Retributionist raises them
+   - Player is alive again
+   - Solution: Will remains, player can continue editing
+   - If player dies again, will is displayed again (current version)
+
+7. AI Will Too Long:
+   - AI generates will content > 200 chars
+   - Solution: Truncate to 200 chars (hard limit)
+   - Add "..." at end to indicate truncation
+   - Log warning (AI prompt needs tuning)
+
+8. Special Characters in Will:
+   - Player uses emojis, Unicode, special chars
+   - Solution: Allow UTF-8 encoding, display properly
+   - Sanitize only dangerous chars (scripts, HTML)
+
+9. Will Editing During Phase Transition:
+   - Player editing will as phase changes
+   - Solution: Allow editing at any time (no phase restriction)
+   - Auto-save ensures no data loss
+
+10. Empty Will vs. No Will:
+    - Player leaves will blank vs. never opened editor
+    - Solution: Treat both as "No will left."
+    - No distinction in display
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+
+class LastWill(BaseModel):
+    player_id: int
+    content: str = Field(default="", max_length=200)
+    last_edited: Optional[datetime] = None
+    edit_count: int = 0
+    is_forged: bool = False
+    original_content: Optional[str] = None
+    forger_id: Optional[int] = None
+
+    def update_content(self, new_content: str):
+        """Update will content"""
+        if len(new_content) > 200:
+            new_content = new_content[:200]
+        self.content = new_content
+        self.last_edited = datetime.now()
+        self.edit_count += 1
+        # Editing after being forged resets forge
+        if self.is_forged:
+            self.is_forged = False
+            self.original_content = None
+            self.forger_id = None
+
+class ForgerAction(BaseModel):
+    forger_id: int
+    target_id: int
+    forged_content: str = Field(max_length=200)
+    night_used: int
+    uses_remaining: int = Field(default=3, ge=0, le=3)
+
+class WillTemplate(BaseModel):
+    name: str
+    content: str
+    role: str
+
+class WillSystem:
+    def __init__(self):
+        self.wills: dict[int, LastWill] = {}
+        self.templates = self._load_templates()
+
+    def _load_templates(self) -> dict[str, WillTemplate]:
+        """Load will templates for different roles"""
+        return {
+            "Sheriff": WillTemplate(
+                name="Sheriff Template",
+                content="Night 1: \nNight 2: \nNight 3: ",
+                role="Sheriff"
+            ),
+            "Investigator": WillTemplate(
+                name="Investigator Template",
+                content="N1: \nN2: \nN3: ",
+                role="Investigator"
+            ),
+            # ... more templates
+        }
+
+    def edit_will(self, player_id: int, content: str):
+        """Edit a player's will"""
+        if player_id not in self.wills:
+            self.wills[player_id] = LastWill(player_id=player_id)
+
+        self.wills[player_id].update_content(content)
+
+    def forge_will(self, forger_action: ForgerAction):
+        """Forge a target player's will"""
+        target_will = self.wills.get(forger_action.target_id)
+        if not target_will:
+            return
+
+        # Store original
+        target_will.original_content = target_will.content
+        target_will.content = forger_action.forged_content
+        target_will.is_forged = True
+        target_will.forger_id = forger_action.forger_id
+
+    def get_will_for_display(self, player_id: int, cleaned: bool = False) -> str:
+        """Get will content for death announcement"""
+        if cleaned:
+            return None  # Don't show will if cleaned
+
+        will = self.wills.get(player_id)
+        if not will or not will.content.strip():
+            return "No will left."
+
+        return will.content
+```
+
+LLM Integration for AI Will Generation:
+  - Prompt template:
+    ```
+    You are playing Town of Salem as a {role}.
+    Your current will: "{current_will}"
+    New information to add: {new_info}
+    Update your will (max 200 chars). Be concise and clear.
+    ```
+  - Response: Updated will content
+  - Timeout: 10 seconds
+  - Fallback: Append "{new_info}" to current will manually
+
+Performance:
+  - Will editing should auto-save with 1 second debounce
+  - Store wills in memory (small data size)
+  - Persist to game state on each save
+  - Efficient retrieval on death (indexed by player_id)

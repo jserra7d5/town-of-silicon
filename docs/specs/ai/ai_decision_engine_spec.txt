@@ -1,0 +1,362 @@
+FILENAME: ai_decision_engine_spec.txt
+
+SYSTEM: AI Decision Engine
+
+DEPENDENCIES:
+- AI Context Management (provides context for decisions)
+- All action systems (executes AI decisions)
+- Pydantic AI (LLM-based decision making)
+
+DATA STRUCTURES:
+
+AIDecision:
+  - decision_id: int
+  - player_id: int
+  - decision_type: DecisionType
+  - decision_data: Dict
+  - confidence: float (0.0-1.0)
+  - reasoning: str (LLM's explanation)
+
+DecisionType (enum):
+  - NIGHT_TARGET: Choose target for night action
+  - VOTE_DECISION: Vote to accuse someone
+  - JUDGMENT_VOTE: Vote guilty/innocent
+  - CLAIM_ROLE: Decide what role to claim
+  - CHAT_MESSAGE: Generate chat message
+  - WHISPER_TARGET: Choose who to whisper to
+  - DEFENSE_SPEECH: Generate defense when on trial
+
+TargetDecision:
+  - target_id: int
+  - target_name: str
+  - reasoning: str
+
+VoteDecision:
+  - vote_type: "guilty" | "innocent" | "abstain"
+  - reasoning: str
+
+ClaimDecision:
+  - claimed_role: str
+  - claim_details: str
+  - reasoning: str
+
+DecisionStrategy:
+  - role: str
+  - strategy_type: StrategyType
+  - priorities: List[Priority]
+
+StrategyType (enum):
+  - AGGRESSIVE: Push votes, make bold claims
+  - CAUTIOUS: Wait and observe, minimal talk
+  - DECEPTIVE: Lie, frame others
+  - HELPFUL: Share info, coordinate Town
+  - CHAOTIC: Random, unpredictable (Jester)
+
+Priority:
+  - objective: str
+  - weight: float
+  - conditions: List[str]
+
+DECISION PROMPTS:
+
+Night Target Selection:
+```
+You are a {role}. It is Night {night}. Choose your target.
+
+Living players:
+{player_list_with_known_info}
+
+Your suspicions:
+{suspicion_levels}
+
+Who do you target tonight? Explain your choice.
+
+Respond in JSON:
+{
+  "target_id": number,
+  "reasoning": "string"
+}
+```
+
+Voting Decision:
+```
+{player_name} is on trial. Their defense: "{defense_speech}"
+
+They claim to be: {claimed_role}
+
+Your information about them:
+- Suspicion level: {suspicion}/10
+- Behavioral notes: {notes}
+- Investigation results: {results}
+
+Do you vote guilty, innocent, or abstain?
+
+Respond in JSON:
+{
+  "vote": "guilty|innocent|abstain",
+  "reasoning": "string"
+}
+```
+
+Role Claim Decision:
+```
+You are a {true_role} ({faction}). Someone asked your role in chat.
+
+Options:
+1. Claim your true role (risky if you're evil)
+2. Fake claim a Town role
+3. Stay vague
+
+What do you claim? Consider:
+- Your faction (Town should claim true, Mafia should lie)
+- Believability (don't claim taken roles)
+- Risk (claiming Sheriff means you need fake results)
+
+Respond in JSON:
+{
+  "claimed_role": "string",
+  "reasoning": "string"
+}
+```
+
+DECISION LOGIC:
+
+1. Decision Request:
+   - Game system requests AI decision
+   - Example: "Night phase, choose target"
+
+2. Context Preparation:
+   - Load AI Context
+   - Determine decision type
+   - Build appropriate prompt
+
+3. LLM Call (via Pydantic AI):
+   ```python
+   from pydantic_ai import Agent
+   from pydantic import BaseModel
+
+   class TargetDecision(BaseModel):
+       target_id: int
+       reasoning: str
+
+   agent = Agent(
+       model='openai:gpt-4o',
+       result_type=TargetDecision
+   )
+
+   result = await agent.run(
+       user_prompt=prompt,
+       deps=ai_context
+   )
+
+   # result.data is a validated TargetDecision object
+   target = result.data
+   ```
+
+4. Decision Validation:
+   - Ensure target_id is valid (alive player)
+   - Ensure vote is valid enum value
+   - Ensure claimed role exists
+
+5. Decision Execution:
+   - Submit to appropriate system
+   - Record decision in AI memory
+
+6. Fallback Decision:
+   - If LLM fails/times out, use rule-based fallback:
+     * Night target: Random from high-suspicion players
+     * Vote: Abstain
+     * Claim: True role (Town) or random claim (Mafia)
+
+ROLE-SPECIFIC STRATEGIES:
+
+Town Investigative (Sheriff, Investigator):
+  - Priority: Investigate suspicious players
+  - Share results publicly
+  - Vote based on findings
+  - Claim true role early (Day 2-3)
+
+Town Killing (Jailor, Vigilante):
+  - Priority: Kill confirmed evils
+  - Don't shoot randomly (risk hitting Town)
+  - Jailor: Ask for role claims in jail
+  - Vigilante: Only shoot with strong evidence
+
+Town Protective (Doctor, Bodyguard):
+  - Priority: Protect confirmed Town power roles
+  - Protect Jailor/Mayor/revealed Investigator
+  - Don't reveal early (becomes target)
+
+Mafia:
+  - Priority: Kill Town power roles
+  - Fake claim Town role convincingly
+  - Vote Town members
+  - Coordinate with Mafia in Mafia chat
+  - Don't be too aggressive (suspicious)
+
+Serial Killer:
+  - Priority: Kill anyone (chaos)
+  - Claim Town role
+  - Eliminate threats (Sheriff, Invest)
+  - Survive to end
+
+Executioner:
+  - Priority: Get target lynched
+  - Fake claim Investigator
+  - "Find" evidence against target
+  - Push votes on target
+
+Jester:
+  - Priority: Get lynched
+  - Act suspicious
+  - Make contradictory claims
+  - Vote randomly
+
+DECISION MAKING ALGORITHM:
+
+```python
+class AIDecisionEngine:
+    def __init__(self, context_manager, llm_config):
+        self.context_manager = context_manager
+        self.agent = Agent(
+            model=f'{llm_config.provider}:{llm_config.model_name}',
+            result_type=None  # Set per decision type
+        )
+
+    async def decide_night_target(self, player_id: int) -> int:
+        context = self.context_manager.get_context_for_llm(player_id)
+
+        # Build prompt
+        prompt = self.build_night_target_prompt(context)
+
+        # LLM call with timeout
+        try:
+            agent = Agent(
+                model=self.llm_config.model,
+                result_type=TargetDecision,
+                system_prompt=self.context_manager.build_system_prompt(context)
+            )
+
+            result = await agent.run(
+                user_prompt=prompt,
+                deps=context,
+                timeout=20.0
+            )
+
+            target = result.data.target_id
+
+            # Validate
+            if not self.is_valid_target(target, context):
+                return self.fallback_target(context)
+
+            return target
+
+        except TimeoutError:
+            return self.fallback_target(context)
+
+    def fallback_target(self, context: AIContext) -> int:
+        # Rule-based fallback
+        living = [p for p in get_living_players() if p.player_id != context.player_id]
+
+        # For Town roles: target highest suspicion
+        if context.faction == "Town":
+            sorted_by_suspicion = sorted(
+                living,
+                key=lambda p: context.memory.suspicion_levels.get(p.player_id, 0.5),
+                reverse=True
+            )
+            return sorted_by_suspicion[0].player_id if sorted_by_suspicion else random.choice(living).player_id
+
+        # For Mafia: target random Town
+        return random.choice(living).player_id
+
+    def build_night_target_prompt(self, context: AIContext) -> str:
+        living_players = get_living_players()
+        player_list = "\n".join([
+            f"- {p.player_id}. {p.name}" +
+            (f" ({p.role})" if p.role in context.known_information.revealed_roles else "") +
+            f" [Suspicion: {context.memory.suspicion_levels.get(p.player_id, 0.5):.1f}/1.0]"
+            for p in living_players if p.player_id != context.player_id
+        ])
+
+        return f"""Choose your target for tonight.
+
+Living players:
+{player_list}
+
+Recent events:
+{context.known_information.observed_events[-5:]}
+
+Who do you target? Consider your role's goals and the current game state."""
+```
+
+AI BEHAVIOR VARIATION:
+
+Personality Traits (randomized per AI):
+- Aggression: 0.0-1.0 (how quickly to vote/push lynches)
+- Deception: 0.0-1.0 (willingness to lie as Town)
+- Talkativeness: 0.0-1.0 (chat frequency)
+- Risk-taking: 0.0-1.0 (bold plays vs. safe plays)
+
+These affect:
+- Decision temperature (higher = more random)
+- Vote timing (aggressive = vote early)
+- Claim strategy (deceptive = fake claims even as Town)
+
+EDGE CASES:
+
+1. All High-Suspicion Players Dead:
+   - Fall back to random target selection
+
+2. LLM Returns Invalid Target:
+   - Validate and use fallback
+
+3. Decision Takes Too Long:
+   - 20-second timeout
+   - Use fallback decision
+
+4. Contradictory Strategy:
+   - LLM wants to vote guilty but context says innocent
+   - Trust LLM (it has reasoning)
+
+IMPLEMENTATION:
+
+```python
+from pydantic import BaseModel
+from pydantic_ai import Agent
+
+class TargetDecision(BaseModel):
+    target_id: int
+    reasoning: str
+
+class VoteDecision(BaseModel):
+    vote: str  # "guilty", "innocent", "abstain"
+    reasoning: str
+
+class AIDecisionEngine:
+    def __init__(self, llm_config):
+        self.llm_config = llm_config
+
+    async def decide_with_llm(self,
+                             prompt: str,
+                             context: AIContext,
+                             result_type: type[BaseModel]):
+        agent = Agent(
+            model=self.llm_config.model_name,
+            result_type=result_type,
+            system_prompt=build_system_prompt(context)
+        )
+
+        try:
+            result = await agent.run(prompt, deps=context, timeout=20.0)
+            return result.data
+        except Exception as e:
+            logging.error(f"LLM decision failed: {e}")
+            return None
+```
+
+PERFORMANCE:
+
+- Decision generation: 2-15 seconds (LLM dependent)
+- Fallback decision: <100ms
+- Validation: <10ms

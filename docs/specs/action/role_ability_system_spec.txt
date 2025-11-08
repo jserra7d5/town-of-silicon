@@ -1,0 +1,400 @@
+FILENAME: role_ability_system_spec.txt
+
+SYSTEM: Role Ability System
+
+DEPENDENCIES:
+- Role Assignment System (defines each role and its abilities)
+- Night Action System (most abilities are night actions)
+- Phase Management System (some abilities usable during day)
+
+DATA STRUCTURES:
+
+RoleAbility:
+  - ability_id: str
+  - role: str
+  - name: str
+  - description: str
+  - action_type: ActionType
+  - phase_usable: List[PhaseType] (DAY, NIGHT, or both)
+  - targeting_mode: TargetingMode
+  - max_uses: int | null (null = unlimited)
+  - uses_remaining: int
+  - cooldown_nights: int (nights between uses, 0 = no cooldown)
+  - last_used_night: int
+  - attack_value: int (0-3)
+  - defense_granted: int (0-4, for protective abilities)
+  - is_passive: bool (always active vs. active ability)
+  - immunities: List[str] (roleblock_immune, detection_immune, etc.)
+
+TargetingMode (enum):
+  - SINGLE: Target one player
+  - SELF: Target self only
+  - DUAL: Target two players (Transporter)
+  - CONTROL: Witch-style (pick controller and victim)
+  - NONE: No target (Veteran alert, Arsonist ignite)
+
+AbilityConstraint:
+  - constraint_type: ConstraintType
+  - value: Any
+
+ConstraintType (enum):
+  - LIMITED_USES: Maximum number of uses (Veteran: 3 alerts)
+  - COOLDOWN: Nights between uses
+  - NIGHT_RESTRICTION: Can only use on certain nights (Werewolf: full moons)
+  - ONE_TIME: Can only use once per game
+  - CONDITIONAL: Requires condition (Jailor execution requires having jailed someone)
+
+PlayerAbilityState:
+  - player_id: int
+  - role: str
+  - abilities: List[RoleAbility]
+  - ability_history: List[AbilityUseRecord]
+
+AbilityUseRecord:
+  - ability_id: str
+  - night_used: int
+  - day_used: int
+  - target_ids: List[int]
+  - result: str
+
+ROLE ABILITIES REFERENCE:
+
+TOWN INVESTIGATIVE:
+  Sheriff:
+    - Interrogate: Investigate if target is suspicious (Mafia/SK/Werewolf)
+    - Unlimited uses, every night
+    - GF appears "Not Suspicious"
+
+  Investigator:
+    - Investigate: Learn target's role (returns set of 3 possible roles)
+    - Unlimited uses, every night
+
+  Lookout:
+    - Watch: See all players who visit target
+    - Unlimited uses, every night
+
+  Spy:
+    - Bug: See who Mafia visits + Mafia chat
+    - Unlimited uses, every night
+
+TOWN KILLING:
+  Jailor:
+    - Jail: Jail target (roleblock + protect)
+    - Unlimited uses
+    - Execute: Kill jailed player (3 uses, loses ability if executes Town)
+
+  Veteran:
+    - Alert: Kill all visitors, gain basic defense
+    - 3 uses total
+
+  Vigilante:
+    - Shoot: Kill target with basic attack
+    - 3 bullets
+    - If shoots Town, dies from guilt next night
+
+  Vampire Hunter:
+    - Check: Detect if target is Vampire
+    - Becomes Vigilante if all vampires dead
+
+TOWN PROTECTIVE:
+  Doctor:
+    - Heal: Give target basic defense, cure poison
+    - Unlimited uses
+    - Self-heal: 1 use
+
+  Bodyguard:
+    - Guard: Give target powerful defense, counterattack attacker
+    - Unlimited uses
+    - Self-heal: 1 use
+
+  Crusader:
+    - Protect: Guard target, attack one random visitor
+    - Unlimited uses
+
+TOWN SUPPORT:
+  Escort:
+    - Roleblock: Prevent target from using ability
+    - Unlimited uses
+    - Dies if roleblocks Serial Killer/Werewolf
+
+  Mayor:
+    - Reveal: Permanently reveal as Mayor (vote counts as 3)
+    - 1 use (irreversible)
+    - Cannot be healed after reveal
+
+  Medium:
+    - Séance: Speak with dead at night
+    - Channeling: Séance specific dead player (1 use)
+
+  Retributionist:
+    - Raise Dead: Resurrect dead Town to use ability once
+    - 1 use total
+
+  Transporter:
+    - Transport: Swap two players (all targeting redirects)
+    - Unlimited uses
+
+MAFIA KILLING:
+  Godfather:
+    - Kill: Order kill with basic attack
+    - Unlimited uses
+    - Detection immune (appears Not Suspicious to Sheriff)
+    - Basic defense
+
+  Mafioso:
+    - Kill: Carry out Godfather's orders
+    - Becomes Godfather if GF dies
+
+  Ambusher:
+    - Ambush: Attack one visitor to target
+    - 2 uses
+
+MAFIA DECEPTION:
+  Disguiser:
+    - Disguise: Appear as target's role if you die
+    - 3 uses
+
+  Forger:
+    - Forge: Replace target's will with fake will
+    - 3 uses
+
+  Framer:
+    - Frame: Make target appear suspicious to Sheriff
+    - Unlimited uses
+
+  Hypnotist:
+    - Hypnotize: Give target false feedback
+    - Unlimited uses
+
+  Janitor:
+    - Clean: Hide target's role and will
+    - 3 uses
+
+MAFIA SUPPORT:
+  Blackmailer:
+    - Blackmail: Silence target during day, see all whispers
+    - Unlimited uses
+
+  Consigliere:
+    - Investigate: Learn target's exact role
+    - Unlimited uses
+
+  Consort:
+    - Roleblock: Prevent target from using ability
+    - Unlimited uses
+    - Basic defense
+
+NEUTRAL KILLING:
+  Serial Killer:
+    - Kill: Murder target with basic attack
+    - Unlimited uses
+    - Kills roleblockers
+    - Basic defense
+
+  Arsonist:
+    - Douse: Mark target with gasoline
+    - Ignite: Kill all doused targets
+    - Choose one per night
+    - Basic defense
+
+  Werewolf:
+    - Maul: Kill target + all visitors (only on full moon nights)
+    - Full moon every other night (Night 2, 4, 6, etc.)
+    - Basic defense
+
+NEUTRAL EVIL:
+  Jester:
+    - None during day/night
+    - Win condition: Get lynched
+    - Haunt: Kill one guilty voter (after being lynched)
+
+  Executioner:
+    - None
+    - Win condition: Get target lynched
+    - Becomes Jester if target dies at night
+
+  Witch:
+    - Control: Force player to target another player
+    - Unlimited uses
+    - Basic defense
+
+NEUTRAL BENIGN:
+  Survivor:
+    - Vest: Gain basic defense for the night
+    - 4 uses
+
+  Amnesiac:
+    - Remember: Choose dead player's role and become that role
+    - 1 use
+
+  Guardian Angel:
+    - Protect: Give target powerful defense
+    - 2 uses
+    - Self-vest: Protect self (2 uses)
+
+LOGIC FLOW:
+
+1. Ability Initialization:
+   - When player assigned role, load role's abilities
+   - Set uses_remaining = max_uses
+   - Set cooldown trackers
+
+2. Ability Availability Check:
+   - Check if current phase allows ability use
+   - Check if uses_remaining > 0
+   - Check if cooldown expired
+   - Check if special conditions met
+
+3. Ability Use:
+   - Player selects ability and target(s)
+   - Validate targeting
+   - Create NightAction or DayAction
+   - Decrement uses_remaining
+   - Record last_used_night
+
+4. Ability Resolution:
+   - Execute via Night Action System or immediate (for day abilities)
+   - Generate result
+   - Apply effects
+   - Notify player of outcome
+
+5. Passive Abilities:
+   - Always active (e.g., GF detection immunity, SK basic defense)
+   - No activation required
+   - Checked during action resolution
+
+UI REQUIREMENTS:
+
+Ability Panel:
+  - Shows all abilities for player's role
+  - Each ability displays:
+    * Name and description
+    * Uses remaining (if limited)
+    * Cooldown status
+    * "Use Ability" button (enabled/disabled)
+
+Target Selection:
+  - Appropriate UI based on TargetingMode
+  - Player list for SINGLE targeting
+  - Two player lists for DUAL
+  - Self-confirmation for SELF abilities
+
+Ability Confirmation:
+  - "Confirm ability use on {target}?"
+  - Preview of effect
+  - "Yes" / "Cancel"
+
+Ability Feedback:
+  - After use: "Ability used on {target}"
+  - After resolution: Result message
+  - Update uses remaining
+
+AI BEHAVIOR:
+
+AI Ability Usage:
+  - AI uses abilities based on role objectives
+  - Prioritizes high-value targets
+  - Manages limited uses strategically
+  - Considers risk vs. reward
+
+VALIDATION RULES:
+
+1. Usage Permission:
+   - Correct phase for ability
+   - Uses remaining > 0
+   - Cooldown expired
+   - Player alive
+
+2. Target Validation:
+   - Valid player ID
+   - Target alive (usually)
+   - Not self (unless SELF targeting)
+   - Correct number of targets
+
+EDGE CASES:
+
+1. Ability Used on Transported Target:
+   - Transport redirects ability
+   - Ability affects swapped player
+
+2. Roleblocked Ability:
+   - Ability fails but use is consumed
+   - Exception: Jailor/SK immune
+
+3. Limited Use Exhausted:
+   - Disable ability button
+   - Show "No uses remaining"
+
+4. Role Change Mid-Game:
+   - Amnesiac remembers new role
+   - Load new abilities
+   - Reset uses for new role
+
+IMPLEMENTATION NOTES:
+
+```python
+from pydantic import BaseModel
+from typing import List, Optional
+from enum import Enum
+
+class TargetingMode(str, Enum):
+    SINGLE = "single"
+    SELF = "self"
+    DUAL = "dual"
+    CONTROL = "control"
+    NONE = "none"
+
+class RoleAbility(BaseModel):
+    ability_id: str
+    role: str
+    name: str
+    description: str
+    targeting_mode: TargetingMode
+    max_uses: Optional[int] = None  # None = unlimited
+    uses_remaining: int
+    cooldown_nights: int = 0
+    attack_value: int = 0
+    defense_granted: int = 0
+    is_passive: bool = False
+
+class AbilitySystem:
+    def __init__(self):
+        self.role_abilities = self._load_abilities()
+
+    def _load_abilities(self) -> dict:
+        # Define all role abilities
+        return {
+            "Sheriff": [
+                RoleAbility(
+                    ability_id="sheriff_interrogate",
+                    role="Sheriff",
+                    name="Interrogate",
+                    description="Check if target is suspicious",
+                    targeting_mode=TargetingMode.SINGLE,
+                    max_uses=None,
+                    uses_remaining=999
+                )
+            ],
+            "Veteran": [
+                RoleAbility(
+                    ability_id="veteran_alert",
+                    role="Veteran",
+                    name="Alert",
+                    description="Go on alert, kill all visitors",
+                    targeting_mode=TargetingMode.NONE,
+                    max_uses=3,
+                    uses_remaining=3,
+                    attack_value=1,
+                    defense_granted=1
+                )
+            ],
+            # ... all other roles
+        }
+
+    def can_use_ability(self, ability: RoleAbility, night: int) -> bool:
+        if ability.uses_remaining <= 0:
+            return False
+        if night - ability.last_used_night < ability.cooldown_nights:
+            return False
+        return True
+```

@@ -1,0 +1,623 @@
+FILENAME: death_system_spec.txt
+
+SYSTEM: Death System
+
+DEPENDENCIES:
+- Role Assignment System (role information for death announcements)
+- Phase Management System (deaths processed at specific phases)
+- Night Action System (many actions cause death)
+- Voting System (lynching causes death)
+- Last Will System (wills displayed on death)
+- Death Note System (death notes displayed for certain kills)
+
+DATA STRUCTURES:
+
+PlayerDeathInfo:
+  - player_id: int
+  - player_name: string
+  - role: string
+  - faction: string
+  - death_night: int (which night they died, 0 if day death)
+  - death_day: int (which day they died, 0 if night death)
+  - death_cause: DeathCause
+  - killed_by: int | null (player ID of killer, if applicable)
+  - last_will: string (200 char max)
+  - death_note: string | null (if killer left a note)
+  - cleaned: bool (if Janitor cleaned the body)
+  - revived: bool (if Retributionist raised them)
+
+DeathCause (enum):
+  - LYNCHED: "lynched" (voted guilty in trial)
+  - MAFIA_KILL: "mafia" (killed by Mafia)
+  - SERIAL_KILLER: "serial killer" (killed by SK)
+  - ARSONIST: "arsonist" (ignited)
+  - WEREWOLF: "werewolf" (mauled by WW)
+  - VIGILANTE: "vigilante" (shot by Vigilante)
+  - VETERAN: "veteran" (attacked Veteran on alert)
+  - BODYGUARD: "bodyguard" (attacked protected target)
+  - JAILOR: "jailor" (executed in jail)
+  - GUILT: "guilt" (Vigilante shot town)
+  - JESTER_HAUNT: "jester" (haunted by Jester)
+  - SUICIDE: "suicide" (used on self)
+  - LEAVE: "left" (player left game)
+
+DeathAnnouncement:
+  - player_id: int
+  - player_name: string
+  - death_message: string (e.g., "John Hathorne died last night.")
+  - role_revealed: string | null (role name or null if cleaned)
+  - will_display: string | null
+  - death_note_display: string | null
+  - killer_hint: string | null (e.g., "They were killed by a member of the Mafia")
+
+Graveyard:
+  - dead_players: List[PlayerDeathInfo]
+  - deaths_by_night: Dict[int, List[PlayerDeathInfo]]
+  - deaths_by_day: Dict[int, List[PlayerDeathInfo]]
+
+GraveyardChat:
+  - participants: List[int] (player IDs of dead players)
+  - messages: List[ChatMessage]
+  - enabled_during: List[PhaseType] (usually just NIGHT)
+
+ResurrectionInfo:
+  - player_id: int
+  - resurrected_by: int (Retributionist player ID)
+  - resurrection_night: int
+  - temporary: bool (true for Retributionist - only one use)
+  - original_death_info: PlayerDeathInfo
+
+DEATH CAUSES AND MESSAGES:
+
+Lynch Death:
+  Trigger: Player voted guilty in trial
+  Message: "{PlayerName} was lynched by the Town."
+  Role Revealed: Always (unless Disguiser)
+  Will Displayed: Yes (unless Forger forged it)
+  Death Note: None
+  Special: Jester wins if Jester is lynched
+
+Mafia Kill:
+  Trigger: Godfather/Mafioso night kill succeeds
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes (unless Janitor cleaned)
+  Will Displayed: Yes (unless cleaned or forged)
+  Death Note: Optional (if killer wrote one)
+  Killer Hint: "They were killed by a member of the Mafia."
+
+Serial Killer:
+  Trigger: Serial Killer attack succeeds
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes (unless cleaned)
+  Will Displayed: Yes (unless cleaned or forged)
+  Death Note: Optional
+  Killer Hint: "They were killed by a Serial Killer."
+
+Arsonist:
+  Trigger: Arsonist ignites, target was doused
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They were incinerated by an Arsonist."
+  Special: Multiple players can die simultaneously from ignite
+
+Werewolf:
+  Trigger: Werewolf attacks on full moon night
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They were mauled by a Werewolf."
+  Special: Werewolf kills target AND all visitors to target
+
+Vigilante:
+  Trigger: Vigilante shoots target
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They were shot by a Vigilante."
+  Special: If target was Town, Vigilante dies from guilt next night
+
+Vigilante Guilt:
+  Trigger: Vigilante shot Town member previous night
+  Message: "{VigilanteName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They died from guilt over killing a Town member."
+
+Veteran:
+  Trigger: Player visits Veteran while on alert
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They were killed by a Veteran."
+
+Bodyguard:
+  Trigger: Player attacks bodyguard's target
+  Message: "{AttackerName} died last night." AND "{BodyguardName} died last night."
+  Role Revealed: Yes (both)
+  Will Displayed: Yes (both)
+  Death Note: None
+  Killer Hint: "They were killed by a Bodyguard." (attacker) / "They died protecting their target." (bodyguard)
+  Special: Both attacker and bodyguard die (unless bodyguard has self-heal)
+
+Jailor Execution:
+  Trigger: Jailor chooses to execute jailed player
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They were executed by the Jailor."
+  Special: If executed player was Town, Jailor loses execution power
+
+Jester Haunt:
+  Trigger: Jester was lynched, haunts a guilty voter
+  Message: "{PlayerName} died last night."
+  Role Revealed: Yes
+  Will Displayed: Yes
+  Death Note: None
+  Killer Hint: "They were haunted by the Jester."
+  Special: Occurs the night after Jester lynching
+
+Cleaned Death (Janitor):
+  Trigger: Janitor cleans a Mafia kill
+  Message: "{PlayerName} died last night."
+  Role Revealed: "We could not determine their role."
+  Will Displayed: No
+  Death Note: No
+  Killer Hint: None
+  Special: Role is hidden from Town, but Mafia still sees it
+
+LOGIC FLOW:
+
+1. Death Event Creation:
+   When a player dies:
+   a. Create PlayerDeathInfo object
+   b. Set player.is_alive = false
+   c. Set death_cause, killed_by, night/day number
+   d. Capture last_will from player's will
+   e. Capture death_note if applicable (from killer)
+   f. Add to graveyard.dead_players list
+
+2. Night Death Processing:
+   After all night actions resolved:
+   a. Collect all players who died this night
+   b. Apply Janitor cleaning (if Janitor cleaned):
+      - Set cleaned=true on death info
+      - Hide role and will
+   c. Apply Forger modifications (if Forger forged):
+      - Replace will with forged will
+   d. Sort deaths by player number (for consistent display order)
+   e. Queue death announcements for next day
+
+3. Day Death Processing (Lynch):
+   Immediately after guilty verdict:
+   a. Create PlayerDeathInfo for lynched player
+   b. Display death announcement immediately
+   c. Show role reveal
+   d. Show last will (unless forged)
+   e. Transition to NIGHT phase after last words
+
+4. Death Announcement Display:
+   At start of each day:
+   a. Display night death count: "X players died last night."
+   b. For each death:
+      - Show player name and death message
+      - Show role (or "We could not determine their role" if cleaned)
+      - Show will (if not cleaned/blocked)
+      - Show death note (if present)
+      - Show killer hint
+
+5. Graveyard Management:
+   a. When player dies, add to graveyard
+   b. Enable graveyard chat access for dead player
+   c. Dead player can see:
+      - All other dead players
+      - All roles (even cleaned ones)
+      - Graveyard chat
+      - Game events (but cannot interact)
+
+6. Graveyard Chat:
+   During NIGHT phase:
+   a. Dead players can chat with each other
+   b. Living players cannot see graveyard chat
+   c. Medium can read graveyard chat (one-way)
+   d. Messages prefixed with "💀" icon
+   e. Chat is separate from living chat
+
+7. Role Reveal on Death:
+   When player dies:
+   a. Check if death should reveal role:
+      - Lynched: Always reveal (unless Disguiser disguised)
+      - Night kill: Reveal unless Janitor cleaned
+   b. Update player list UI with revealed role
+   c. AI players learn the revealed role
+   d. Update investigation results (confirmed role)
+
+8. Death Immunity Resolution:
+   When attack targets player with defense:
+   a. Compare attack value to defense value:
+      - Attack > Defense: Player dies
+      - Attack <= Defense: Player survives
+   b. If player survives:
+      - Send notification to player: "You were attacked but your defense was too strong!"
+      - No death announcement
+      - Attacker may or may not be notified (depends on role)
+
+9. Multi-Death Scenarios:
+   a. Collect all deaths from night actions
+   b. Remove duplicates (same player killed by multiple sources)
+   c. Assign primary death_cause (priority order):
+      1. Jailor execution (highest priority)
+      2. Vigilante guilt (self-inflicted)
+      3. Jester haunt
+      4. First successful attack (if multiple)
+   d. Display all deaths together at day start
+
+10. Cleaned Death Special Handling:
+    When Janitor cleans a body:
+    a. Town sees: "We could not determine their role."
+    b. Mafia members see: Actual role in Mafia chat
+    c. Role is revealed to everyone if Janitor dies
+    d. Cleaned roles still count for victory conditions
+
+UI REQUIREMENTS:
+
+Death Announcement Panel (Day Start):
+  - Large banner: "Night {N} - {X} players died"
+  - For each death:
+    * Player name in large text
+    * Death flavor text: "died last night" or "was lynched"
+    * Role icon and name (or "?" if cleaned)
+    * Faction color coding (red/green/gray)
+    * Last Will section:
+      - Header: "{PlayerName}'s Last Will"
+      - Will text (max 200 chars)
+      - "No will left" if empty
+    * Death Note section (if present):
+      - Header: "Death Note"
+      - Note text
+      - Styled differently (red text, italic)
+  - Scroll through deaths if multiple (Next button)
+  - "Continue" button to proceed to day discussion
+
+Player List UI Updates:
+  - Dead players shown in gray/faded
+  - Skull icon next to name
+  - Strike-through text
+  - Role revealed (if not cleaned)
+  - Cannot be voted or targeted
+  - Clicking shows their death info
+
+Graveyard View:
+  - Clickable "Graveyard" tab/button
+  - Shows all dead players in chronological order
+  - Each entry shows:
+    * Player name
+    * Role (actual role, even if cleaned)
+    * Day/Night died
+    * Last Will
+  - Dead players see graveyard chat here
+
+Graveyard Chat (for dead players):
+  - Separate chat panel during NIGHT
+  - Header: "💀 Graveyard Chat"
+  - Dark theme (gray/black)
+  - All dead players can send/receive
+  - Medium can only read (if alive)
+
+Death Notifications (Personal):
+  - When you die:
+    * Screen fades to grayscale
+    * Large message: "You have died!"
+    * Show your final role card
+    * Show how you died
+    * "You can now speak with the dead" message
+  - When killed but survive:
+    * Red flash effect
+    * Message: "You were attacked! Your defense was too strong."
+
+Lynch Death Sequence:
+  - Guilty verdict announced
+  - Player's role revealed with animation
+  - Last Will displayed
+  - 10 second Last Words phase
+  - Player model/icon removed from game
+  - Transition to night
+
+AI BEHAVIOR:
+
+AI Reaction to Deaths:
+  - AI updates their information when roles revealed
+  - AI deduces information from deaths:
+    * If Sheriff dies with "killed by Mafia" → someone is Mafia
+    * If multiple die to ignite → Arsonist exists
+    * If visitor dies to Veteran → Veteran used alert
+  - AI discusses deaths in day chat:
+    * "RIP John, they were a good Sheriff"
+    * "Two people died, we have an Arsonist"
+    * "Who visited the Veteran last night?"
+
+AI Graveyard Chat:
+  - Dead AI players chat in graveyard
+  - Discuss game events
+  - Reveal information they learned before death
+  - May strategize if they can influence living players (Medium)
+  - Casual conversation, commiserate about deaths
+
+AI Death Note Strategy:
+  - Mafia/NK may leave death notes to:
+    * Taunt Town
+    * Mislead investigation
+    * Claim credit for kills
+    * False flag as different role
+  - Examples:
+    * "This is what happens to snitches - The Mafia"
+    * "You were too nosy - SK"
+    * "Another Town scum eliminated"
+
+AI Will Reading:
+  - AI reads and analyzes dead players' wills
+  - If will claims role, AI updates their suspicions
+  - If will lists suspicious players, AI investigates those names
+  - AI can spot fake wills (inconsistencies)
+
+AI Janitor/Forger Usage:
+  - Janitor cleans important roles (Sheriff, Investigator)
+  - Forger forges wills to:
+    * Hide investigative results
+    * Frame other players
+    * Create fake claims
+  - Strategic timing (don't waste limited uses)
+
+VALIDATION RULES:
+
+1. Death State Validation:
+   - Player cannot die twice
+   - Dead players cannot perform actions
+   - Dead players cannot be targeted by most actions (exceptions: Retributionist, Medium)
+   - is_alive flag must be consistent across all systems
+
+2. Death Announcement Validation:
+   - Each death must have valid death_cause
+   - If killed_by is set, must reference valid player
+   - Last will must be ≤200 characters
+   - Death note must be ≤100 characters
+
+3. Graveyard Validation:
+   - All dead players in graveyard
+   - No living players in graveyard
+   - Death counts match actual deaths
+   - Chronological order maintained
+
+4. Role Reveal Validation:
+   - Lynched players always reveal role (unless Disguiser)
+   - Cleaned deaths don't reveal role to Town
+   - Disguiser shows target's role, not Disguiser
+
+5. Graveyard Chat Validation:
+   - Only dead players can send to graveyard chat
+   - Medium can read but not send (if alive)
+   - Graveyard chat only enabled during NIGHT
+
+EDGE CASES:
+
+1. Everyone Dies Same Night:
+   - Werewolf full moon + Arsonist ignite + Mafia kills
+   - Solution: Process all deaths, then check victory
+   - Result: Draw (everyone dead)
+
+2. Last Player Lynched:
+   - Town lynches last Town member
+   - Solution: Check victory immediately after lynch
+   - Mafia/NK wins
+
+3. Killer Dies While Killing:
+   - Bodyguard kills attacker, both die
+   - Solution: Both deaths processed simultaneously
+   - Both get death announcements
+
+4. Disguiser Death:
+   - Disguiser disguised as Sheriff, dies
+   - Solution: Display Sheriff role on death, not Disguiser
+   - Real Sheriff now appears as duplicate (conflict)
+   - Disguiser's true role revealed when Disguiser dies
+
+5. Janitor Cleans Janitor:
+   - Janitor dies, another Mafia was Janitor who cleans
+   - Solution: Valid, Janitor can clean any role
+   - Cleaned Janitor's role hidden from Town
+
+6. Forger Forges Will of Player Who Didn't Die:
+   - Forger uses ability on target, but target doesn't die
+   - Solution: Forged will is wasted, not applied
+   - Forger ability use still consumed
+
+7. Multiple Killers Target Same Player:
+   - Mafia, Serial Killer, and Vigilante all target same player
+   - Solution: Player only dies once
+   - death_cause is first successful kill (priority order)
+   - Other killers don't know they were redundant
+
+8. Retributionist Raises Dead Player:
+   - Dead player temporarily resurrected
+   - Solution: Player becomes alive for one night
+   - Player performs action, then dies again
+   - New death announcement next day: "returned to the dead"
+
+9. Jester Lynched, Haunts, but All Guilty Voters Dead:
+   - Rare: Jester lynched Day 2, guilty voters die Night 2
+   - Solution: Jester cannot haunt (no valid targets)
+   - Jester still wins, but no haunt occurs
+
+10. Medium Seance Target Dies:
+    - Medium seances a dead player who is then raised by Retributionist
+    - Solution: Seance fails (target no longer dead)
+    - Medium ability use not consumed
+
+11. Cleaned Role Counts for Victory:
+    - Last Mafia killed and cleaned
+    - Solution: Town still wins (cleaned Mafia still counts as dead Mafia)
+    - Victory conditions ignore cleaned status
+
+12. Player Leaves Game:
+    - Player disconnects or quits
+    - Solution: Treat as death (death_cause=LEAVE)
+    - Role revealed immediately
+    - No will or death note
+    - Announce: "{PlayerName} has left the game."
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
+from enum import Enum
+from datetime import datetime
+
+class DeathCause(str, Enum):
+    LYNCHED = "lynched"
+    MAFIA_KILL = "mafia"
+    SERIAL_KILLER = "serial_killer"
+    ARSONIST = "arsonist"
+    WEREWOLF = "werewolf"
+    VIGILANTE = "vigilante"
+    VETERAN = "veteran"
+    BODYGUARD = "bodyguard"
+    JAILOR = "jailor"
+    GUILT = "guilt"
+    JESTER_HAUNT = "jester"
+    LEAVE = "left"
+
+class PlayerDeathInfo(BaseModel):
+    player_id: int
+    player_name: str
+    role: str
+    faction: str
+    death_night: int = 0
+    death_day: int = 0
+    death_cause: DeathCause
+    killed_by: Optional[int] = None
+    last_will: str = ""
+    death_note: Optional[str] = None
+    cleaned: bool = False
+    revived: bool = False
+    death_timestamp: datetime
+
+class DeathAnnouncement(BaseModel):
+    player_id: int
+    player_name: str
+    death_message: str
+    role_revealed: Optional[str]
+    will_display: Optional[str]
+    death_note_display: Optional[str]
+    killer_hint: Optional[str]
+
+class Graveyard(BaseModel):
+    dead_players: List[PlayerDeathInfo] = []
+    deaths_by_night: Dict[int, List[PlayerDeathInfo]] = {}
+    deaths_by_day: Dict[int, List[PlayerDeathInfo]] = {}
+
+class DeathSystem:
+    def __init__(self):
+        self.graveyard = Graveyard()
+
+    def process_death(self, player_id: int, cause: DeathCause,
+                     game_state, killed_by: Optional[int] = None):
+        """Process a player death"""
+        player = game_state.get_player(player_id)
+
+        death_info = PlayerDeathInfo(
+            player_id=player_id,
+            player_name=player.name,
+            role=player.role,
+            faction=player.faction,
+            death_night=game_state.night_number if cause != DeathCause.LYNCHED else 0,
+            death_day=game_state.day_number if cause == DeathCause.LYNCHED else 0,
+            death_cause=cause,
+            killed_by=killed_by,
+            last_will=player.last_will,
+            death_timestamp=datetime.now()
+        )
+
+        # Mark player as dead
+        player.is_alive = False
+        player.death_info = death_info
+
+        # Add to graveyard
+        self.graveyard.dead_players.append(death_info)
+
+        # Index by night/day
+        if cause == DeathCause.LYNCHED:
+            if death_info.death_day not in self.graveyard.deaths_by_day:
+                self.graveyard.deaths_by_day[death_info.death_day] = []
+            self.graveyard.deaths_by_day[death_info.death_day].append(death_info)
+        else:
+            if death_info.death_night not in self.graveyard.deaths_by_night:
+                self.graveyard.deaths_by_night[death_info.death_night] = []
+            self.graveyard.deaths_by_night[death_info.death_night].append(death_info)
+
+        return death_info
+
+    def create_death_announcement(self, death_info: PlayerDeathInfo,
+                                  game_state) -> DeathAnnouncement:
+        """Create announcement to display to players"""
+        # Determine what information to reveal
+        role_revealed = None if death_info.cleaned else death_info.role
+        will_display = None if death_info.cleaned else death_info.last_will
+
+        # Generate death message
+        death_message = self._generate_death_message(death_info)
+        killer_hint = self._generate_killer_hint(death_info)
+
+        return DeathAnnouncement(
+            player_id=death_info.player_id,
+            player_name=death_info.player_name,
+            death_message=death_message,
+            role_revealed=role_revealed,
+            will_display=will_display,
+            death_note_display=death_info.death_note,
+            killer_hint=killer_hint
+        )
+
+    def _generate_death_message(self, death_info: PlayerDeathInfo) -> str:
+        """Generate flavor text for death"""
+        if death_info.death_cause == DeathCause.LYNCHED:
+            return f"{death_info.player_name} was lynched by the Town."
+        else:
+            return f"{death_info.player_name} died last night."
+
+    def _generate_killer_hint(self, death_info: PlayerDeathInfo) -> Optional[str]:
+        """Generate hint about who killed the player"""
+        hints = {
+            DeathCause.MAFIA_KILL: "They were killed by a member of the Mafia.",
+            DeathCause.SERIAL_KILLER: "They were killed by a Serial Killer.",
+            DeathCause.ARSONIST: "They were incinerated by an Arsonist.",
+            DeathCause.WEREWOLF: "They were mauled by a Werewolf.",
+            DeathCause.VIGILANTE: "They were shot by a Vigilante.",
+            DeathCause.VETERAN: "They were killed by a Veteran.",
+            DeathCause.JAILOR: "They were executed by the Jailor.",
+            DeathCause.GUILT: "They died from guilt over killing a Town member.",
+            DeathCause.JESTER_HAUNT: "They were haunted by the Jester."
+        }
+        return hints.get(death_info.death_cause)
+```
+
+Death Priority Order:
+  When multiple kill sources target same player:
+  1. Jailor execution (unstoppable, priority 1)
+  2. Ignite (if already doused)
+  3. First submitted kill action
+
+  Record primary death_cause, ignore secondary
+
+Performance:
+  - Death processing should be <10ms per death
+  - Batch death announcements for display
+  - Index graveyard by night/day for fast lookup
+  - Cache death counts for victory condition checks

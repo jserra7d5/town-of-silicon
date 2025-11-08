@@ -1,0 +1,466 @@
+FILENAME: death_note_system_spec.txt
+
+SYSTEM: Death Note System
+
+DEPENDENCIES:
+- Death System (death notes displayed with deaths)
+- Night Action System (death notes set during kill actions)
+- Role Assignment System (only certain roles can leave death notes)
+
+DATA STRUCTURES:
+
+DeathNote:
+  - killer_id: int (player who wrote the note)
+  - killer_role: str (Godfather, Serial Killer, Arsonist, etc.)
+  - target_id: int (victim who will receive the note)
+  - content: str (max 100 characters)
+  - night_written: int
+  - is_displayed: bool (true if victim died and note shown)
+
+DeathNoteTemplate:
+  - name: str (template name)
+  - content: str (pre-written death note)
+  - role: str (which killer role this template is for)
+  - tone: str ("taunting", "mysterious", "intimidating", etc.)
+
+KillerNoteSettings:
+  - role: str
+  - can_leave_notes: bool
+  - max_note_length: int (default 100)
+  - note_frequency: float (AI: how often to leave notes, 0.0-1.0)
+
+DEATH NOTE MECHANICS:
+
+Who Can Leave Death Notes:
+  - Godfather: Yes (Mafia kills)
+  - Mafioso: Yes (if performing kill)
+  - Serial Killer: Yes
+  - Arsonist: No (ignite doesn't leave personal notes)
+  - Werewolf: No (too frenzied to write notes)
+  - Vigilante: No (Town role, doesn't leave taunting notes)
+  - Jailor: No (execution is official, not personal)
+
+Death Note Writing:
+  - Killer selects target at night
+  - Optional: Click "Write Death Note" button
+  - Opens death note editor (max 100 chars)
+  - Type note content
+  - Note is attached to kill action
+  - If kill succeeds, note is displayed with death announcement
+
+Death Note Display:
+  - Shown in death announcement panel
+  - Appears after victim's will
+  - Format:
+    * Header: "Death Note" (red text, italic)
+    * Content: note text
+    * Styled differently (red background, gothic font optional)
+  - Only displayed if victim actually dies
+
+Strategic Purpose:
+  - Psychological warfare (taunt Town, intimidate players)
+  - Misdirection (claim to be different role)
+  - Roleplay/flavor (add personality to kills)
+  - False information (frame other players)
+
+LOGIC FLOW:
+
+1. Death Note Creation (Human Killer):
+   a. Player selects kill target at night
+   b. UI shows "Write Death Note" button
+   c. Player clicks button (optional)
+   d. Death note editor opens:
+      - Text area (max 100 chars)
+      - Character counter: "X/100"
+      - Optional templates dropdown
+      - Submit button or auto-attach
+   e. Player types note
+   f. Note is attached to night action
+
+2. Death Note Creation (AI Killer):
+   a. AI decides whether to leave death note:
+      - Random chance based on role/personality (30-50% of kills)
+      - More likely if: Trying to intimidate, misdirect, or roleplay
+   b. If leaving note, AI generates content:
+      - Use LLM to generate creative note
+      - Prompt: "Write a {tone} death note as {role} for killing {victim}. Max 100 chars."
+      - Tone options: "taunting", "mysterious", "intimidating", "cryptic"
+   c. AI submits note with kill action
+
+3. Death Note Validation:
+   a. Check killer has permission to leave notes
+   b. Check note length <= 100 characters
+   c. Sanitize content (remove HTML/scripts)
+   d. Attach to kill action
+
+4. Death Note Display (When Victim Dies):
+   a. Night actions resolve, victim dies
+   b. Death System creates death announcement
+   c. Check if kill has attached death note
+   d. If yes:
+      - Include death note in death announcement
+      - Display after victim's will
+      - Format with special styling
+   e. If no:
+      - No death note section
+
+5. Death Note Display (When Victim Survives):
+   a. Kill fails (victim has defense, protected, etc.)
+   b. Death note is NOT displayed
+   c. Note is wasted (killer doesn't know if victim survived)
+
+6. Janitor Interaction:
+   a. Janitor cleans a kill that has death note
+   b. Death note is NOT displayed (Janitor hides everything)
+   c. Mafia members still see death note in Mafia chat
+
+7. AI Death Note Analysis (Town):
+   a. AI Town players read death notes
+   b. AI tries to deduce information:
+      - "Death note says 'SK' → might be Serial Killer"
+      - "Death note taunts Sheriff → killer knows roles?"
+      - "Death note mentions Mafia → might be false flag"
+   c. AI may discuss death notes in day chat:
+      - "That death note seems like a Serial Killer"
+      - "The Mafia is getting cocky"
+
+8. Death Note Templates:
+   a. Offer pre-written templates for quick selection:
+      - "You were too nosy."
+      - "This is what happens to snitches."
+      - "The Mafia sends their regards."
+      - "You should have stayed quiet."
+      - "Another one bites the dust."
+   b. Player can select template or write custom
+   c. AI uses templates 40% of the time, custom 60%
+
+9. Death Note Persistence:
+   a. Store death notes in game history
+   b. Associate with specific deaths
+   c. Review in post-game summary
+
+10. Multiple Killers Same Target:
+    a. Mafia, Serial Killer both target same player
+    b. Both leave death notes
+    c. Victim dies (only once)
+    d. Solution: Display first death note (based on priority)
+    e. Other death note is lost
+
+UI REQUIREMENTS:
+
+Death Note Editor (Night Phase):
+  - Accessible when selecting kill target
+  - Button: "✍️ Write Death Note" (optional)
+  - Opens modal or inline editor:
+    * Header: "Death Note for {VictimName}"
+    * Text area: Multiline, 100 char max
+    * Character counter: "X/100"
+    * Templates dropdown: "Use Template" (optional)
+    * Preview area
+    * Submit/Attach button
+  - Can skip (leave no note)
+
+Death Note Display (Death Announcement):
+  - Position: Below victim's will in death announcement
+  - Styling:
+    * Header: "Death Note" (red, bold)
+    * Border: Red or dark border
+    * Background: Light red or dark background
+    * Font: Gothic or dramatic font (optional, thematic)
+  - Content:
+    * Death note text (preserve line breaks)
+    * Italic styling
+  - Clear visual separation from will
+
+Death Note Templates Dropdown:
+  - Quick select templates:
+    * "Taunting" category:
+      - "You were too nosy."
+      - "Should have minded your own business."
+    * "Intimidating" category:
+      - "This is what happens to snitches."
+      - "The town will fall."
+    * "Mysterious" category:
+      - "..."
+      - "You know too much."
+    * "Mafia-themed" category:
+      - "The Mafia sends their regards."
+      - "Nothing personal, just business."
+  - Click to auto-fill editor
+
+Death Note Toggle:
+  - Checkbox: "Leave Death Note" (on/off)
+  - If off, no editor shown
+  - If on, editor appears
+  - Default: Off (opt-in)
+
+Post-Game Death Note Review:
+  - Show all death notes left during game
+  - Format: "Night {N}: {Killer} → {Victim}: '{Note}'"
+  - Group by killer
+  - Export functionality
+
+AI BEHAVIOR:
+
+AI Death Note Strategy (Mafia):
+  - Leave notes to:
+    * Intimidate Town ("The Mafia is watching...")
+    * Misdirect ("This is the work of the Serial Killer")
+    * Taunt specific roles ("Nice try, Sheriff")
+  - Coordinate with Mafia:
+    * Discuss whether to leave notes
+    * Avoid patterns that reveal identity
+  - Frequency: 30-40% of kills
+
+AI Death Note Strategy (Serial Killer):
+  - Leave notes to:
+    * Build reputation ("Another victim for the SK")
+    * Psychological warfare ("I'm coming for you all")
+    * Claim credit ("This town is mine")
+  - Serial Killers often leave more notes (50-60% of kills)
+  - More personal, dramatic notes
+
+AI Death Note Content Generation:
+  - Use LLM to generate creative notes:
+    ```
+    Prompt: "You are a {role} in Town of Salem. Write a creative death note for killing {victim_name}.
+    Tone: {tone}. Max 100 characters. Be concise and impactful."
+    ```
+  - Examples:
+    * Godfather: "You talked too much. - The Godfather"
+    * Serial Killer: "Sleep tight, {victim}. You won't wake up."
+    * Mafioso: "The Mafia always wins."
+  - Add variety (don't repeat same note)
+
+AI Death Note Tone Selection:
+  - AI chooses tone based on personality:
+    * Aggressive AI: "intimidating" or "taunting"
+    * Cautious AI: Rarely leaves notes (10-20%)
+    * Roleplay AI: "mysterious" or "dramatic"
+  - Random variance to keep unpredictable
+
+AI Response to Death Notes (Town):
+  - AI reads death notes and analyzes:
+    * "Death note mentions Mafia → probably Mafia kill"
+    * "Death note says 'SK' → confirming Serial Killer"
+    * "Death note is cryptic → Serial Killer?"
+  - AI discusses in day chat (30% chance):
+    * "That death note sounds like the Serial Killer"
+    * "Mafia is getting bold"
+  - AI updates suspicions based on note content
+
+AI False Flag Death Notes:
+  - Mafia may pretend to be Serial Killer:
+    * "Another victim falls to the SK"
+  - Serial Killer may pretend to be Mafia:
+    * "The Mafia strikes again"
+  - Creates confusion, misdirects Town
+
+VALIDATION RULES:
+
+1. Permission Validation:
+   - Only killer roles can leave death notes
+   - Godfather, Mafioso, Serial Killer: Yes
+   - Arsonist, Werewolf, Vigilante, Jailor: No
+   - If not authorized, don't show death note option
+
+2. Content Validation:
+   - Length: 0-100 characters
+   - Empty notes allowed (equivalent to no note)
+   - Sanitize HTML/scripts (prevent XSS)
+   - Allow line breaks, basic formatting
+
+3. Target Validation:
+   - Death note must be attached to valid kill action
+   - Target must be valid player
+   - Cannot leave note without kill action
+
+4. Display Validation:
+   - Only display if victim actually dies
+   - Don't display if Janitor cleaned
+   - Don't display if kill failed (victim survived)
+
+EDGE CASES:
+
+1. Multiple Killers, One Victim:
+   - Mafia and Serial Killer both target same player, both leave notes
+   - Solution: Display death note from primary killer (highest priority)
+   - Priority order: Jailor > Mafia > Serial Killer > Other
+   - Secondary notes are lost
+
+2. Killer Leaves Note, Victim Survives:
+   - Killer writes note, but victim has defense/protection
+   - Solution: Note is not displayed, wasted effort
+   - Killer doesn't know if victim survived (no feedback)
+
+3. Janitor Cleans Death with Note:
+   - Killer leaves death note, Janitor cleans same kill
+   - Solution: Death note not displayed to Town
+   - Mafia members still see note in Mafia chat (internal)
+
+4. Death Note Too Long:
+   - AI generates note > 100 characters
+   - Solution: Truncate to 100 characters
+   - Add "..." at end if truncated
+
+5. Killer Dies Before Victim:
+   - Night 1: Killer writes note for future kill
+   - Can't happen - notes are per-action, not stored
+   - Solution: Notes only attached to specific night actions
+
+6. Death Note Contains Sensitive Info:
+   - Killer accidentally reveals their own identity in note
+   - Example: "I am Player 7, the Godfather"
+   - Solution: Allow (player mistake is valid)
+   - AI should avoid this (prompt engineering)
+
+7. Special Characters in Note:
+   - Player uses emojis, Unicode
+   - Solution: Allow UTF-8 encoding, display properly
+   - Sanitize dangerous characters only
+
+8. Empty Death Note:
+   - Player opens editor, leaves it blank, submits
+   - Solution: Treat as no death note, don't display section
+
+9. Death Note During Multiple Deaths:
+   - 3 players die same night, 2 have death notes
+   - Solution: Display each death note with respective death
+   - Each death announcement is separate
+
+10. AI Death Note Generation Timeout:
+    - AI LLM takes too long to generate note
+    - Solution: 10 second timeout
+    - If timeout, skip death note (don't leave one)
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class DeathNote(BaseModel):
+    killer_id: int
+    killer_role: str
+    target_id: int
+    content: str = Field(default="", max_length=100)
+    night_written: int
+    is_displayed: bool = False
+
+class DeathNoteTemplate(BaseModel):
+    name: str
+    content: str
+    role: str
+    tone: str
+
+class KillerNoteSettings(BaseModel):
+    role: str
+    can_leave_notes: bool
+    max_note_length: int = 100
+    note_frequency: float = 0.5  # AI leaves notes 50% of the time
+
+class DeathNoteSystem:
+    def __init__(self):
+        self.notes: list[DeathNote] = []
+        self.templates = self._load_templates()
+        self.settings = self._load_settings()
+
+    def _load_settings(self) -> dict[str, KillerNoteSettings]:
+        """Define which roles can leave death notes"""
+        return {
+            "Godfather": KillerNoteSettings(role="Godfather", can_leave_notes=True, note_frequency=0.4),
+            "Mafioso": KillerNoteSettings(role="Mafioso", can_leave_notes=True, note_frequency=0.3),
+            "Serial Killer": KillerNoteSettings(role="Serial Killer", can_leave_notes=True, note_frequency=0.6),
+            "Arsonist": KillerNoteSettings(role="Arsonist", can_leave_notes=False),
+            "Werewolf": KillerNoteSettings(role="Werewolf", can_leave_notes=False),
+            "Vigilante": KillerNoteSettings(role="Vigilante", can_leave_notes=False),
+            "Jailor": KillerNoteSettings(role="Jailor", can_leave_notes=False),
+        }
+
+    def _load_templates(self) -> list[DeathNoteTemplate]:
+        """Load pre-written death note templates"""
+        return [
+            DeathNoteTemplate(name="Nosy", content="You were too nosy.", role="any", tone="taunting"),
+            DeathNoteTemplate(name="Snitch", content="This is what happens to snitches.", role="Mafia", tone="intimidating"),
+            DeathNoteTemplate(name="Regards", content="The Mafia sends their regards.", role="Godfather", tone="taunting"),
+            DeathNoteTemplate(name="SK Claim", content="Another victim for the Serial Killer.", role="Serial Killer", tone="mysterious"),
+            DeathNoteTemplate(name="Silent", content="...", role="any", tone="mysterious"),
+        ]
+
+    def can_leave_note(self, killer_role: str) -> bool:
+        """Check if role can leave death notes"""
+        settings = self.settings.get(killer_role)
+        return settings and settings.can_leave_notes
+
+    def create_death_note(self, killer_id: int, killer_role: str,
+                          target_id: int, content: str, night: int) -> Optional[DeathNote]:
+        """Create a death note for a kill action"""
+        if not self.can_leave_note(killer_role):
+            return None
+
+        if len(content) > 100:
+            content = content[:100]
+
+        note = DeathNote(
+            killer_id=killer_id,
+            killer_role=killer_role,
+            target_id=target_id,
+            content=content.strip(),
+            night_written=night,
+            is_displayed=False
+        )
+
+        self.notes.append(note)
+        return note
+
+    def get_note_for_death(self, target_id: int, night: int) -> Optional[DeathNote]:
+        """Retrieve death note for a victim"""
+        for note in self.notes:
+            if note.target_id == target_id and note.night_written == night:
+                note.is_displayed = True
+                return note
+        return None
+
+    def generate_ai_death_note(self, killer_role: str, victim_name: str,
+                               llm_client) -> str:
+        """Generate death note using LLM"""
+        settings = self.settings.get(killer_role)
+        if not settings or not settings.can_leave_notes:
+            return ""
+
+        # Random chance to leave note
+        import random
+        if random.random() > settings.note_frequency:
+            return ""
+
+        # Generate with LLM
+        prompt = f"""You are a {killer_role} in Town of Salem.
+Write a creative death note for killing {victim_name}.
+Tone: intimidating. Max 100 characters. Be concise and impactful."""
+
+        try:
+            response = llm_client.generate(prompt, max_tokens=50, timeout=10)
+            return response[:100]  # Ensure max length
+        except Exception:
+            # Fallback to template
+            return random.choice([t.content for t in self.templates if t.role in [killer_role, "any"]])
+```
+
+LLM Integration for AI Death Note Generation:
+  - Prompt template:
+    ```
+    You are playing Town of Salem as a {killer_role}.
+    You just killed {victim_name}.
+    Write a creative, {tone} death note (max 100 characters).
+    Examples: "You talked too much.", "The {role} strikes again.", "..."
+    ```
+  - Timeout: 10 seconds
+  - Fallback: Use random template if LLM fails
+  - Variety: Use different tones to keep interesting
+
+Performance:
+  - Death note creation: <5ms
+  - Store notes in memory (small data)
+  - Efficient lookup by target_id and night
+  - Display notes only when victim actually dies (avoid unnecessary processing)

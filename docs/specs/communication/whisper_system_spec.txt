@@ -1,0 +1,466 @@
+FILENAME: whisper_system_spec.txt
+
+SYSTEM: Whisper System
+
+DEPENDENCIES:
+- Phase Management System (whispers only during day phases)
+- Day Chat System (whispers are a type of chat)
+- Role Assignment System (Blackmailer can see all whispers)
+- Death System (dead players cannot whisper)
+
+DATA STRUCTURES:
+
+WhisperMessage:
+  - message_id: int
+  - sender_id: int
+  - recipient_id: int
+  - content: str (max 200 characters)
+  - timestamp: datetime
+  - day_number: int
+  - phase: PhaseType
+  - seen_by: List[int] (sender, recipient, and Blackmailer if exists)
+  - is_public: bool (everyone sees that whisper occurred, but not content)
+
+WhisperNotification:
+  - from_player: string (player name)
+  - to_player: string (player name)
+  - public_message: string ("{From} whispered to {To}")
+  - visible_to_all: bool (true - everyone sees notification)
+
+WhisperHistory:
+  - whispers: List[WhisperMessage]
+  - whispers_by_player: Dict[int, List[WhisperMessage]]
+  - whispers_by_day: Dict[int, List[WhisperMessage]]
+
+BlackmailerInterceptInfo:
+  - blackmailer_id: int
+  - intercepted_whispers: List[WhisperMessage]
+  - can_see_all: bool (true for Blackmailer)
+
+WHISPER MECHANICS:
+
+Visibility Rules:
+  - Sender sees the whisper content
+  - Recipient sees the whisper content
+  - Blackmailer (if alive) sees ALL whisper content
+  - All other players see: "{Sender} whispered to {Recipient}" (but not content)
+  - Dead players cannot whisper
+  - Cannot whisper to dead players
+
+Whisper Initiation:
+  - Click on player name in player list
+  - Select "Whisper to {PlayerName}"
+  - Opens whisper input box
+  - Type message (max 200 chars)
+  - Send whisper
+
+Public Announcement:
+  - When whisper sent, public announcement to all players:
+    * "{SenderName} whispered to {RecipientName}"
+  - Displayed in main chat (gray italic text)
+  - Everyone knows whisper occurred, but only sender/recipient/blackmailer know content
+
+Blackmailer Ability:
+  - Blackmailer can see ALL whisper content
+  - Whispers appear in special "Intercepted Whispers" panel for Blackmailer
+  - Format: "[From {Sender} to {Recipient}]: {Content}"
+  - Blackmailer learns valuable information
+  - Blackmailer can also see who is whispering frequently (suspicious)
+
+Mayor Restriction:
+  - Mayor cannot whisper after revealing
+  - Attempting to whisper shows: "The Mayor cannot whisper!"
+  - Prevents Mayor from secretly coordinating (balance)
+
+Jailor Exception:
+  - Jailed player can whisper to Jailor at night
+  - Jailor can whisper to jailed player at night
+  - This is handled separately (jail chat, not standard whisper)
+
+LOGIC FLOW:
+
+1. Whisper Initiation (Human Player):
+   a. Player clicks on another player's name
+   b. Context menu appears: "Whisper to {PlayerName}"
+   c. Click whisper option
+   d. Whisper input box appears with recipient name highlighted
+   e. Type message
+   f. Press Enter or click Send
+
+2. Whisper Validation:
+   a. Check sender is alive: if not, reject
+   b. Check recipient is alive: if not, show "Cannot whisper to dead players"
+   c. Check current phase is DAY_DISCUSSION: if not, show "Can only whisper during day"
+   d. Check sender is not Mayor (if revealed): if Mayor, show "Mayor cannot whisper"
+   e. Check sender is not blackmailed: if blackmailed, show "You are blackmailed!"
+   f. Check message length (1-200 chars): if invalid, show error
+   g. If all checks pass, proceed to send whisper
+
+3. Whisper Sending:
+   a. Create WhisperMessage object:
+      - sender_id = human player ID
+      - recipient_id = selected player ID
+      - content = message text
+      - timestamp = now
+      - day_number = current day
+      - seen_by = [sender_id, recipient_id]
+   b. Check if Blackmailer exists and is alive:
+      - If yes, add Blackmailer ID to seen_by
+   c. Broadcast public notification to all players:
+      - "{SenderName} whispered to {RecipientName}"
+   d. Send whisper content to recipient (private)
+   e. Send whisper content to Blackmailer if alive (private)
+   f. Add to whisper history
+
+4. Whisper Reception (Recipient):
+   a. Receive WhisperMessage
+   b. Display in whisper panel/chat:
+      - Header: "Whisper from {SenderName}"
+      - Content: message text
+      - Reply button
+   c. Play notification sound (subtle, different from day chat)
+   d. Show badge/indicator on UI (unread whisper)
+
+5. Whisper Reception (Blackmailer):
+   a. Receive WhisperMessage
+   b. Display in "Intercepted Whispers" panel:
+      - Format: "[{SenderName} → {RecipientName}]: {Content}"
+      - Time: [HH:MM]
+   c. Highlight in different color (yellow/orange)
+   d. Blackmailer can use this info to deduce roles, find targets
+
+6. Public Notification Display:
+   a. All players see in main chat:
+      - "{SenderName} whispered to {RecipientName}"
+   b. Displayed in gray italic (differentiated from regular chat)
+   c. No content shown
+   d. Players can track who is whispering to whom
+
+7. Whisper Reply:
+   a. Recipient clicks "Reply" button
+   b. Opens whisper input pre-filled with original sender as recipient
+   c. Type reply
+   d. Send (same validation and process)
+
+8. AI Whisper Behavior:
+   a. AI decides when to whisper based on:
+      - Secret information to share (investigation results)
+      - Coordination with confirmed allies
+      - Asking for protection (if Doctor exists)
+      - Building trust with specific players
+   b. AI generates whisper content (shorter than day chat, more direct)
+   c. AI simulates typing delay (1-5 seconds for whispers)
+   d. AI sends whisper
+
+9. AI Whisper Response:
+   a. AI receives whisper
+   b. AI processes content (updates knowledge base)
+   c. AI decides whether to reply (50-70% chance if relevant)
+   d. AI generates reply
+   e. AI sends reply after delay (5-15 seconds)
+
+10. Mayor Reveal Handling:
+    a. When Mayor reveals:
+       - Disable whisper ability for Mayor
+       - Clear any active whisper input boxes from Mayor
+       - Show message: "The Mayor cannot whisper"
+    b. Mayor can still receive whispers from others
+    c. Mayor cannot reply via whisper
+
+UI REQUIREMENTS:
+
+Whisper Initiation:
+  - Right-click player name in player list
+  - Context menu:
+    * "Whisper to {PlayerName}"
+    * "Vote {PlayerName}" (if voting active)
+    * "Target {PlayerName}" (if night phase and has targeting ability)
+  - OR: Click whisper icon next to player name
+
+Whisper Input Box:
+  - Appears as small popup or inline input
+  - Header: "Whisper to {RecipientName}"
+  - Text input (1-200 chars)
+  - Character counter: "X/200"
+  - Send button and Cancel button
+  - OR: Dedicated whisper tab in chat window
+
+Whisper Display (Private):
+  - Whisper panel or tab in chat window
+  - Shows all whispers sent and received by player
+  - Format:
+    * To: [HH:MM] To {RecipientName}: {Content}
+    * From: [HH:MM] From {SenderName}: {Content}
+  - Different background color (dark blue) to distinguish from day chat
+  - Reply button next to received whispers
+
+Public Whisper Notification:
+  - Displayed in main day chat
+  - Format: "{SenderName} whispered to {RecipientName}"
+  - Gray italic text
+  - Small whisper icon (💬) before text
+  - Timestamp: [HH:MM]
+
+Blackmailer Intercepted Whispers:
+  - Dedicated "Intercepted Whispers" panel (only visible to Blackmailer)
+  - Header: "📡 Intercepted Whispers"
+  - Shows all whispers in the game
+  - Format: "[{Sender} → {Recipient}]: {Content}"
+  - Highlighted in yellow/orange
+  - Scrollable if many whispers
+
+Whisper Restrictions UI:
+  - If dead: Whisper button grayed out, tooltip "Dead players cannot whisper"
+  - If blackmailed: Whisper button disabled, tooltip "You are blackmailed!"
+  - If Mayor (revealed): Whisper button disabled, tooltip "The Mayor cannot whisper"
+  - If night phase: Whisper button disabled, tooltip "Can only whisper during the day"
+
+Unread Whisper Indicator:
+  - Badge on whisper tab/button showing count (e.g., "3")
+  - Highlight whisper panel
+  - Clear badge when whisper panel opened
+
+Whisper History:
+  - Searchable/filterable
+  - "Show whispers from {PlayerName}"
+  - "Show whispers to {PlayerName}"
+  - "Show whispers on Day {N}"
+
+AI BEHAVIOR:
+
+AI Whisper Strategy:
+  - Town Investigative roles whisper results:
+    * "I investigated PlayerX, they are suspicious" (Sheriff)
+    * "PlayerY is Godfather/Mafioso/Arsonist" (Investigator)
+  - Town Protective roles ask for claims:
+    * "Are you an important role? I can protect you" (Doctor/Bodyguard)
+  - Mafia may whisper to:
+    * Build fake trust with Town
+    * Claim Town role to specific player
+    * Ask for coordination (risky, Blackmailer may intercept)
+  - Executioner whispers to build case against target:
+    * "I saw PlayerX do something suspicious"
+
+AI Whisper Frequency:
+  - Town roles: 1-3 whispers per day (strategic)
+  - Mafia roles: 0-2 whispers per day (cautious, risk of Blackmailer)
+  - Neutral roles: 0-1 whispers per day (stay low profile)
+
+AI Response to Received Whispers:
+  - If investigation result: Thank sender, update knowledge
+  - If asking for protection: Claim role or decline
+  - If accusation: Defend or acknowledge
+  - If request for cooperation: Agree or be non-committal
+
+AI Blackmailer Usage:
+  - Blackmailer reads all whispers
+  - AI Blackmailer analyzes whispers to:
+    * Identify power roles (Jailor, Investigator, Doctor)
+    * Find targets for Mafia kills
+    * Blackmail talkative/important players
+    * Share intel with Mafia in Mafia chat
+  - AI Blackmailer doesn't reveal knowledge too obviously (would expose role)
+
+AI Mayor Whisper Restriction:
+  - AI Mayor stops whispering after reveal
+  - AI Mayor uses public chat to communicate
+  - AI Mayor may have whispered before reveal (establishing trust)
+
+VALIDATION RULES:
+
+1. Sender Validation:
+   - Must be alive
+   - Must not be blackmailed
+   - Must not be Mayor (if revealed)
+   - Must be in DAY_DISCUSSION phase
+
+2. Recipient Validation:
+   - Must be alive
+   - Must be different from sender (cannot whisper to self)
+   - Must be valid player ID (1-15)
+
+3. Content Validation:
+   - Length: 1-200 characters
+   - No empty messages
+   - Sanitize HTML/scripts (prevent XSS)
+
+4. Phase Validation:
+   - Whispers only allowed during DAY_DISCUSSION
+   - Exception: Jail chat (separate system)
+
+5. Blackmailer Interception:
+   - If Blackmailer alive, automatically add to seen_by
+   - Blackmailer must be alive (dead Blackmailer doesn't intercept)
+
+EDGE CASES:
+
+1. Blackmailer Dies During Day:
+   - Blackmailer intercepting whispers, then gets lynched same day
+   - Solution: Blackmailer stops intercepting whispers after death
+   - Whispers sent before death are still in Blackmailer's log
+
+2. Whisper to Player Who Dies:
+   - Player sends whisper, recipient dies immediately after (rare, but possible with disconnect)
+   - Solution: Whisper still sent, but recipient cannot reply
+   - Public notification still shows
+
+3. Multiple Blackmailers:
+   - If 2+ Blackmailers in game (custom role list)
+   - Solution: All Blackmailers see all whispers
+   - Each has independent "Intercepted Whispers" panel
+
+4. Mayor Reveals While Typing Whisper:
+   - Mayor typing whisper, then reveals mid-sentence
+   - Solution: Cancel whisper input, disable whisper ability
+   - Show message: "The Mayor cannot whisper"
+
+5. Whisper Spam:
+   - Player sends many whispers rapidly
+   - Solution: Apply same cooldown as day chat (3 seconds)
+   - Rate limit: Max 10 whispers per day phase
+
+6. AI Whisper Generation Timeout:
+   - AI LLM takes too long to generate whisper
+   - Solution: 15 second timeout (shorter than day chat)
+   - If timeout, AI skips whisper
+
+7. Whisper During Phase Transition:
+   - Whisper sent exactly as phase changes from DAY to NIGHT
+   - Solution: Server rejects whisper
+   - Show error: "Day phase ended, whisper not sent"
+
+8. Blackmailer Reads Own Whispers:
+   - Blackmailer sends/receives whispers
+   - Solution: Blackmailer sees own whispers in both regular whisper panel AND intercepted panel
+   - Prevent confusion by marking own whispers differently in intercepted panel
+
+9. Whisper History After Player Death:
+   - Player dies, wants to review whispers from when alive
+   - Solution: Dead players can still view their whisper history
+   - Cannot send new whispers
+
+10. Mass Whisper Coordination:
+    - Town coordinates via whispers to avoid Mafia hearing
+    - Solution: This is valid strategy
+    - Blackmailer can intercept and warn Mafia
+    - Public notifications reveal coordination pattern
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from typing import List, Dict, Optional
+from datetime import datetime
+
+class WhisperMessage(BaseModel):
+    message_id: int
+    sender_id: int
+    recipient_id: int
+    content: str = Field(min_length=1, max_length=200)
+    timestamp: datetime
+    day_number: int
+    phase: str
+    seen_by: List[int]
+    is_public: bool = True  # Public notification is always public
+
+class WhisperHistory(BaseModel):
+    whispers: List[WhisperMessage] = []
+
+class WhisperSystem:
+    def __init__(self):
+        self.history = WhisperHistory()
+        self.blackmailer_id: Optional[int] = None
+
+    def send_whisper(self, sender_id: int, recipient_id: int,
+                     content: str, game_state) -> Optional[WhisperMessage]:
+        """Send a whisper from sender to recipient"""
+        # Validation
+        if not self._can_whisper(sender_id, recipient_id, game_state):
+            return None
+
+        # Create whisper
+        seen_by = [sender_id, recipient_id]
+
+        # Check for Blackmailer
+        blackmailer = self._get_blackmailer(game_state)
+        if blackmailer and blackmailer.is_alive:
+            seen_by.append(blackmailer.player_id)
+            self.blackmailer_id = blackmailer.player_id
+
+        whisper = WhisperMessage(
+            message_id=len(self.history.whispers),
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            content=content.strip(),
+            timestamp=datetime.now(),
+            day_number=game_state.day_number,
+            phase=game_state.current_phase.phase_type,
+            seen_by=seen_by,
+            is_public=True
+        )
+
+        self.history.whispers.append(whisper)
+        return whisper
+
+    def _can_whisper(self, sender_id: int, recipient_id: int,
+                     game_state) -> bool:
+        """Check if sender can whisper to recipient"""
+        sender = game_state.get_player(sender_id)
+        recipient = game_state.get_player(recipient_id)
+
+        # Basic checks
+        if not sender.is_alive or not recipient.is_alive:
+            return False
+
+        if sender_id == recipient_id:
+            return False
+
+        # Phase check
+        if game_state.current_phase.phase_type != "day_discussion":
+            return False
+
+        # Mayor check
+        if sender.role == "Mayor" and sender.revealed:
+            return False
+
+        # Blackmail check
+        if sender.is_blackmailed:
+            return False
+
+        return True
+
+    def _get_blackmailer(self, game_state):
+        """Find living Blackmailer"""
+        for player in game_state.players:
+            if player.role == "Blackmailer" and player.is_alive:
+                return player
+        return None
+
+    def get_whispers_for_player(self, player_id: int) -> List[WhisperMessage]:
+        """Get all whispers visible to a player"""
+        return [w for w in self.history.whispers if player_id in w.seen_by]
+
+    def get_public_notifications(self) -> List[str]:
+        """Get public whisper notifications for chat display"""
+        notifications = []
+        for whisper in self.history.whispers:
+            sender = game_state.get_player(whisper.sender_id)
+            recipient = game_state.get_player(whisper.recipient_id)
+            notifications.append(
+                f"{sender.name} whispered to {recipient.name}"
+            )
+        return notifications
+```
+
+LLM Integration for AI Whispers:
+  - Shorter context window (whispers are brief)
+  - Prompt: "Generate a short, direct whisper message to {recipient} about {topic}"
+  - Max tokens: 50-100 (keep whispers concise)
+  - Faster generation time (15s timeout vs. 30s for day chat)
+
+Performance:
+  - Whisper sending should be <5ms
+  - Efficient lookup for Blackmailer (index by role)
+  - Cache recent whispers for quick display
+  - Support concurrent whispers (multiple AIs whispering at once)

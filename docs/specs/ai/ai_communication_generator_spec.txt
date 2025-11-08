@@ -1,0 +1,347 @@
+FILENAME: ai_communication_generator_spec.txt
+
+SYSTEM: AI Communication Generator
+
+DEPENDENCIES:
+- AI Context Management (context for message generation)
+- AI Decision Engine (decides when to speak)
+- Day Chat System (delivers messages)
+- Whisper System (delivers whispers)
+- Pydantic AI (LLM-based text generation)
+
+DATA STRUCTURES:
+
+GeneratedMessage:
+  - content: str (max 200 chars for chat, 100 for death notes)
+  - message_type: MessageType
+  - confidence: float
+  - generation_time: float (seconds)
+
+MessageType (enum):
+  - DAY_CHAT
+  - WHISPER
+  - DEFENSE_SPEECH
+  - LAST_WORDS
+  - DEATH_NOTE
+  - WILL_UPDATE
+  - MAFIA_CHAT
+
+MessagePrompt:
+  - prompt_template: str
+  - context_vars: Dict
+  - max_length: int
+  - tone: str
+
+GENERATION PROMPTS:
+
+Day Chat Message:
+```
+Generate a brief message for day chat (max 200 characters).
+
+Context:
+- You are a {role} ({faction})
+- Current day: {day_number}
+- Recent deaths: {recent_deaths}
+- Your suspicions: {top_3_suspicious_players}
+
+Purpose: {purpose}
+Options:
+1. Share investigation result
+2. Make accusation
+3. Defend yourself
+4. Respond to question
+5. General discussion
+
+Generate a natural, concise message. Be helpful if Town, deceptive if evil.
+```
+
+Whisper Message:
+```
+Generate a whisper to {target_name} (max 200 characters).
+
+Purpose: {purpose}
+- Share secret information
+- Ask for protection
+- Build trust
+- Coordinate action
+
+Keep it brief and direct.
+```
+
+Defense Speech:
+```
+You are on trial! You have 20 seconds to defend yourself.
+
+Accusations against you:
+{accusations}
+
+Your actual role: {true_role} (Don't reveal if evil!)
+Your claimed role: {claimed_role}
+
+Generate a convincing defense (max 200 characters).
+- Explain your actions
+- Claim your role
+- Point to evidence
+- Stay calm
+```
+
+Last Words:
+```
+You are being lynched. You have 10 seconds for last words.
+
+Your role: {role}
+Your faction: {faction}
+
+Options:
+1. Curse the Town (if evil)
+2. Share final information (if Town)
+3. Dramatic exit
+4. Reveal evil teammates (if giving up)
+
+Generate last words (max 150 characters).
+```
+
+GENERATION LOGIC:
+
+1. Trigger Decision:
+   - AI Decision Engine decides to speak
+   - Determines purpose (accusation, defense, info sharing, etc.)
+
+2. Context Preparation:
+   - Load AI Context
+   - Identify recent events to reference
+   - Determine appropriate tone
+
+3. LLM Generation:
+   ```python
+   from pydantic import BaseModel
+   from pydantic_ai import Agent
+
+   class GeneratedMessage(BaseModel):
+       content: str
+
+   agent = Agent(
+       model=llm_config.model_name,
+       result_type=GeneratedMessage
+   )
+
+   result = await agent.run(
+       prompt,
+       deps=ai_context,
+       timeout=15.0
+   )
+
+   message = result.data.content
+   ```
+
+4. Post-Processing:
+   - Truncate to max length (200 chars for chat)
+   - Remove unsafe characters
+   - Ensure natural language (not JSON or meta)
+
+5. Typing Simulation:
+   - Calculate typing delay based on message length
+   - Formula: delay = len(message) / chars_per_second + thinking_time
+   - chars_per_second: 3-5 (realistic typing speed)
+   - thinking_time: 2-5 seconds
+
+6. Message Delivery:
+   - Wait for typing delay
+   - Submit to Day Chat System
+   - Record in AI memory
+
+MESSAGE PURPOSES:
+
+Accusation:
+  - "I think Player 5 is suspicious because they voted innocent on confirmed Mafia"
+  - "Player 7 claimed Sheriff but hasn't shared any results"
+
+Role Claim:
+  - "I'm the Sheriff"
+  - "I'm Doctor, I can heal people"
+
+Investigation Result (Town):
+  - "I checked Player 3 last night - they're NOT suspicious"
+  - "My invest results: Player 8 is Sheriff, Executioner, or Werewolf"
+
+Fake Investigation (Evil):
+  - "I'm Sheriff, Player 10 came up SUSPICIOUS" (framing)
+  - "I investigated Player 2 - they're Doctor, Disguiser, or Serial Killer"
+
+Defense:
+  - "I'm the Investigator! I found that Player 9 is Mafia!"
+  - "I can't be Mafia, I voted guilty on the Godfather yesterday"
+
+Coordination:
+  - "Everyone vote Player 6"
+  - "Doctor, protect the Jailor tonight"
+
+Casual:
+  - "This is getting intense"
+  - "Who do you guys think is suspicious?"
+
+TONE CONTROL:
+
+Town Roles:
+  - Tone: Helpful, honest, concerned
+  - Examples:
+    * "We need to find the Mafia quickly"
+    * "I trust Player 3, they've been very helpful"
+
+Mafia Roles:
+  - Tone: Deceptive, blending in, slightly helpful
+  - Examples:
+    * "I agree, Player 7 seems suspicious" (fake helpful)
+    * "I'm Town, I swear!" (defensive)
+
+Serial Killer:
+  - Tone: Claiming Town, deflecting suspicion
+  - Examples:
+    * "I'm just a Citizen trying to survive"
+    * "Maybe the Mafia is framing me?"
+
+Jester:
+  - Tone: Suspicious, contradictory, chaotic
+  - Examples:
+    * "I'm the Godfather" (obviously false)
+    * "I didn't visit anyone... wait, I mean I did"
+
+Executioner:
+  - Tone: Focused on target, building case
+  - Examples:
+    * "I saw Player {target} acting very suspicious yesterday"
+    * "Player {target} claimed Doctor but didn't save anyone"
+
+MESSAGE FREQUENCY:
+
+Talkative AI (talkativeness: 0.7-1.0):
+  - 5-8 messages per day phase
+  - Responds quickly to questions
+  - Initiates discussions
+
+Normal AI (talkativeness: 0.4-0.6):
+  - 2-4 messages per day phase
+  - Responds when addressed
+  - Shares important info
+
+Quiet AI (talkativeness: 0.1-0.3):
+  - 0-2 messages per day phase
+  - Only speaks when critical
+  - Short responses
+
+MESSAGE QUALITY:
+
+Good Message Characteristics:
+  - Natural language
+  - Contextually relevant
+  - Appropriate length (50-150 chars ideal)
+  - Advances game state
+  - In-character for role/faction
+
+Bad Messages to Avoid:
+  - Too short: "ok" "yes"
+  - Too long: 200 char walls of text every time
+  - Out of character: Mafia saying "I'm Mafia!"
+  - Meta: "As an AI language model..."
+  - Repetitive: Same message structure every time
+
+IMPLEMENTATION:
+
+```python
+from pydantic import BaseModel, Field
+from pydantic_ai import Agent
+
+class GeneratedMessage(BaseModel):
+    content: str = Field(max_length=200)
+
+class AICommunicationGenerator:
+    def __init__(self, llm_config):
+        self.llm_config = llm_config
+
+    async def generate_chat_message(self,
+                                   ai_context: AIContext,
+                                   purpose: str) -> str:
+        prompt = self.build_chat_prompt(ai_context, purpose)
+
+        agent = Agent(
+            model=self.llm_config.model_name,
+            result_type=GeneratedMessage,
+            system_prompt=self.build_system_prompt(ai_context)
+        )
+
+        try:
+            result = await agent.run(prompt, timeout=15.0)
+            message = result.data.content
+
+            # Validate length
+            if len(message) > 200:
+                message = message[:197] + "..."
+
+            return message
+
+        except Exception as e:
+            # Fallback messages
+            return self.get_fallback_message(purpose)
+
+    def build_chat_prompt(self, context: AIContext, purpose: str) -> str:
+        recent_deaths = [
+            f"{d.player_name} ({d.role})"
+            for d in get_recent_deaths(context.night_number)
+        ]
+
+        suspicious_players = sorted(
+            context.memory.suspicion_levels.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:3]
+
+        return f"""Generate a brief day chat message (max 200 characters).
+
+Purpose: {purpose}
+
+Recent deaths: {recent_deaths}
+Your top suspicions: {suspicious_players}
+
+Be natural and concise. You are a {context.role} ({context.faction})."""
+
+    def get_fallback_message(self, purpose: str) -> str:
+        fallbacks = {
+            "accusation": "I think we should vote someone suspicious",
+            "defense": "I'm not Mafia, I'm Town!",
+            "info_sharing": "I have some information to share",
+            "general": "What do you all think?"
+        }
+        return fallbacks.get(purpose, "Hmm, interesting")
+
+    def simulate_typing_delay(self, message: str) -> float:
+        """Calculate realistic typing delay"""
+        chars_per_second = random.uniform(3, 5)
+        thinking_time = random.uniform(2, 5)
+        typing_time = len(message) / chars_per_second
+        return thinking_time + typing_time
+```
+
+EDGE CASES:
+
+1. LLM Generates Meta Response:
+   - "As an AI, I cannot..."
+   - Solution: Filter out, use fallback
+
+2. LLM Reveals Hidden Info:
+   - Mafia accidentally says "my fellow Mafia members"
+   - Solution: Post-process to remove explicit reveals
+
+3. Message Too Long:
+   - Truncate to 200 chars
+   - Add "..." at end
+
+4. Generation Timeout:
+   - Use fallback message
+   - Log for debugging
+
+PERFORMANCE:
+
+- Message generation: 2-10 seconds (LLM dependent)
+- Post-processing: <50ms
+- Typing simulation: 3-15 seconds (varies by message length)
+- Total time: 5-25 seconds (realistic human timing)

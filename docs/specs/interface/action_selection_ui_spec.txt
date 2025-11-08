@@ -1,0 +1,236 @@
+FILENAME: action_selection_ui_spec.txt
+
+SYSTEM: Action Selection UI
+
+DEPENDENCIES:
+- Night Action System (submits actions)
+- Role Ability System (shows available abilities)
+- Phase Management System (enables/disables based on phase)
+- Voting System (voting UI)
+
+UI COMPONENTS:
+
+NightActionPanel:
+  - Visible during: NIGHT phase
+  - Shows: Available abilities for player's role
+  - Components:
+    * Ability description
+    * Target selection interface
+    * Death note editor (for killers)
+    * Submit button
+    * Cancel/Skip button
+
+DayVotingPanel:
+  - Visible during: DAY_DISCUSSION phase
+  - Shows: Vote buttons next to each player
+  - Components:
+    * Player list with vote buttons
+    * Vote counter (X/Y votes needed)
+    * Unvote button
+
+JudgmentPanel:
+  - Visible during: JUDGMENT phase
+  - Shows: Guilty/Innocent/Abstain buttons
+  - Components:
+    * Large buttons (Guilty, Innocent, Abstain)
+    * Accused player info
+    * Timer (20 seconds)
+
+LAYOUTS:
+
+Night Action Panel:
+```
+┌─────────────────────────────────┐
+│ Night Action - Select Target    │
+├─────────────────────────────────┤
+│ Your Role: Sheriff              │
+│ Ability: Interrogate            │
+│ Description: Check if target is │
+│ suspicious (Mafia/SK/WW)        │
+├─────────────────────────────────┤
+│ Select Target:                  │
+│  [  ] 1. John Hathorne          │
+│  [  ] 2. Sarah Good             │
+│  [✓] 3. William Hobbs           │
+│  [  ] 4. James Bayley           │
+│  ...                            │
+├─────────────────────────────────┤
+│ [Submit Action]  [Skip Night]   │
+└─────────────────────────────────┘
+```
+
+Day Voting (Inline):
+```
+Player List:
+1. John Hathorne      [Vote] [Whisper]
+2. Sarah Good (Dead)
+3. William Hobbs      [Vote] [Whisper]  (2/8)
+4. James Bayley       [Vote] [Whisper]
+...
+```
+
+Judgment Panel:
+```
+┌────────────────────────────────┐
+│ TRIAL: William Hobbs           │
+│ Defense: "I'm the Doctor!"     │
+├────────────────────────────────┤
+│ Vote on their fate:            │
+│                                │
+│   [GUILTY]   [INNOCENT]        │
+│            [ABSTAIN]           │
+│                                │
+│ Time remaining: 15s            │
+└────────────────────────────────┘
+```
+
+INTERACTIONS:
+
+Night Target Selection:
+1. Click player from list
+2. Player highlighted (yellow border)
+3. Submit button enables
+4. Click Submit
+5. Confirmation: "Action submitted"
+6. Panel shows "Waiting for other players..."
+
+Accusation Voting:
+1. Click "Vote" button next to player name
+2. Vote counter updates: "3/8"
+3. Button changes to "Unvote"
+4. Public announcement: "{You} voted {Target}"
+5. If majority: Transition to trial
+
+Judgment Voting:
+1. Click one of three buttons
+2. Button highlights (selected state)
+3. Can change vote (click different button)
+4. Vote is hidden until results phase
+5. Submit automatically on button click
+
+RESPONSIVE DESIGN:
+
+Desktop (1920x1080):
+  - Side panels for actions
+  - Large player list
+  - Dedicated chat area
+
+Tablet (1024x768):
+  - Bottom action panel
+  - Compact player list
+  - Collapsible chat
+
+Mobile (480x800):
+  - Full-screen modals for actions
+  - Swipeable player list
+  - Minimized chat (expandable)
+
+ACCESSIBILITY:
+
+- Keyboard navigation (Tab, Enter)
+- Screen reader support
+- High contrast mode
+- Colorblind-friendly indicators
+- Font size options
+
+FEEDBACK:
+
+Action Submitted:
+  - Green checkmark
+  - Text: "Action confirmed!"
+  - Disable submit button
+
+Action Failed:
+  - Red X
+  - Error message: "Invalid target"
+  - Keep UI active
+
+Waiting State:
+  - Loading spinner
+  - Text: "Waiting for other players... (X/15 ready)"
+  - Cannot change action (optional lock-in)
+
+IMPLEMENTATION:
+
+HTML/CSS Structure:
+```html
+<div class="night-action-panel">
+  <div class="header">Night Action - Select Target</div>
+  <div class="role-info">
+    <span class="role-name">Sheriff</span>
+    <span class="ability-name">Interrogate</span>
+    <p class="ability-desc">Check if target is suspicious</p>
+  </div>
+  <div class="target-selection">
+    <div class="player-option" data-player-id="1">
+      <input type="radio" name="target" value="1">
+      <label>1. John Hathorne</label>
+    </div>
+    <!-- More players -->
+  </div>
+  <div class="actions">
+    <button class="submit-btn">Submit Action</button>
+    <button class="skip-btn">Skip Night</button>
+  </div>
+</div>
+```
+
+JavaScript Logic:
+```javascript
+class ActionSelectionUI {
+  constructor(role, abilities) {
+    this.role = role;
+    this.abilities = abilities;
+    this.selectedTarget = null;
+  }
+
+  selectTarget(playerId) {
+    this.selectedTarget = playerId;
+    this.updateUI();
+  }
+
+  submitAction() {
+    if (!this.selectedTarget) {
+      this.showError("Please select a target");
+      return;
+    }
+
+    // Submit to backend
+    gameClient.submitNightAction({
+      actor_id: this.playerId,
+      target_id: this.selectedTarget,
+      action_type: this.abilities[0].action_type
+    });
+
+    this.showConfirmation("Action submitted!");
+    this.disableUI();
+  }
+}
+```
+
+VALIDATION:
+
+UI-Level Validation:
+  - Disable invalid targets (dead players)
+  - Disable submit until target selected
+  - Show error tooltips on hover
+
+Server-Side Validation:
+  - Final validation in Night Action System
+  - Return error if invalid
+  - UI displays error message
+
+EDGE CASES:
+
+1. Phase Changes Mid-Selection:
+   - Disable UI immediately
+   - Show: "Phase ended"
+   - Clear selection
+
+2. Player Disconnects:
+   - Auto-submit "no action"
+   - Or keep UI active with warning
+
+3. Multiple Abilities:
+   - Show ability selector first
+   - Then target selection for chosen ability

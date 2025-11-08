@@ -1,0 +1,567 @@
+FILENAME: day_chat_system_spec.txt
+
+SYSTEM: Day Chat System
+
+DEPENDENCIES:
+- Phase Management System (chat only enabled during specific phases)
+- Role Assignment System (for role-specific chat restrictions)
+- Death System (dead players cannot chat in day chat)
+- AI Communication Generator (for AI message generation)
+
+DATA STRUCTURES:
+
+ChatMessage:
+  - message_id: int (unique identifier)
+  - sender_id: int (player ID, 1-15)
+  - sender_name: string (display name)
+  - content: string (message text, max 200 chars)
+  - timestamp: datetime
+  - phase: PhaseType (when message was sent)
+  - day_number: int
+  - chat_type: ChatType ("day", "whisper", "mafia", "graveyard")
+  - is_system: bool (true for system announcements)
+  - visible_to: List[int] (player IDs who can see this message)
+
+ChatType (enum):
+  - DAY: "day" (public day discussion)
+  - WHISPER: "whisper" (private 1-on-1)
+  - MAFIA: "mafia" (Mafia members only, at night)
+  - GRAVEYARD: "graveyard" (dead players only, at night)
+  - SYSTEM: "system" (announcements)
+
+ChatRestriction:
+  - player_id: int
+  - restriction_type: RestrictionType
+  - duration: int (phases remaining)
+  - reason: string
+
+RestrictionType (enum):
+  - BLACKMAILED: "blackmailed" (cannot speak)
+  - MUTED: "muted" (not their phase to speak, e.g., defense phase)
+  - DEAD: "dead" (dead players can't speak in day chat)
+  - MAYOR_REVEALED: "mayor_revealed" (Mayor gets highlighted messages)
+
+TypingIndicator:
+  - player_id: int
+  - started_typing: datetime
+  - is_typing: bool
+
+ChatCooldown:
+  - player_id: int
+  - messages_sent_this_phase: int
+  - last_message_time: datetime
+  - cooldown_active: bool
+  - cooldown_expires: datetime
+
+ChatHistory:
+  - messages: List[ChatMessage]
+  - messages_by_day: Dict[int, List[ChatMessage]]
+  - messages_by_player: Dict[int, List[ChatMessage]]
+
+CHAT RULES AND CONSTRAINTS:
+
+Message Length:
+  - Minimum: 1 character
+  - Maximum: 200 characters
+  - Validation: Strip whitespace, reject empty messages
+
+Message Cooldown:
+  - Cooldown duration: 3 seconds between messages (for human player)
+  - AI messages: Simulated typing delay (1-12 seconds, based on length)
+  - Prevents spam and encourages thoughtful communication
+  - Exception: No cooldown for system messages
+
+Rate Limiting:
+  - Maximum messages per day phase: 20 per player
+  - If limit exceeded: "You are speaking too much. Please let others talk."
+  - Prevents chat flooding
+  - AI players respect this limit
+
+Allowed Phases:
+  - DAY_DISCUSSION: All living non-blackmailed players can chat
+  - DEFENSE: Only accused player can speak
+  - LAST_WORDS: Only condemned player can speak
+  - All other phases: Day chat disabled
+
+Blackmail Effect:
+  - Blackmailed players cannot send messages
+  - Chat input disabled with message: "You are blackmailed!"
+  - Blackmail lasts for one day phase
+  - Blackmailer can see all whispers
+
+Mayor Revealed Effect:
+  - Mayor can choose to reveal (permanent)
+  - After reveal, Mayor's messages highlighted in gold
+  - Mayor's vote counts as 3
+  - Mayor cannot be healed after reveal
+
+LOGIC FLOW:
+
+1. Message Submission (Human Player):
+   a. Player types message in chat input
+   b. Validate message:
+      - Length check (1-200 chars)
+      - Phase check (can speak in current phase?)
+      - Restriction check (blackmailed, muted, dead?)
+      - Cooldown check (3 seconds since last message?)
+      - Rate limit check (< 20 messages this phase?)
+   c. If validation passes:
+      - Create ChatMessage object
+      - Set visible_to = all living players
+      - Broadcast to all living players
+      - Add to chat history
+      - Start cooldown timer
+      - Increment messages_sent_this_phase
+   d. If validation fails:
+      - Show error message to player
+      - Do not send message
+
+2. Message Submission (AI Player):
+   a. AI generates message using AI Communication Generator
+   b. AI simulates typing delay:
+      - Calculate delay based on message length
+      - Short (<20 chars): 1-3 seconds
+      - Medium (20-60 chars): 3-6 seconds
+      - Long (60+ chars): 6-12 seconds
+   c. Show typing indicator while "typing"
+   d. After delay, submit message (same validation as human)
+
+3. Message Display:
+   a. Receive ChatMessage from server/system
+   b. Format message for display:
+      - Timestamp: [HH:MM]
+      - Sender name: [PlayerName]
+      - Content: message text
+      - Color coding:
+        * Regular player: White text
+        * Mayor (revealed): Gold text, bold
+        * System message: Gray italic
+   c. Append to chat log
+   d. Scroll chat to bottom (show latest)
+   e. Play subtle notification sound
+
+4. Typing Indicator:
+   a. When player starts typing:
+      - Send typing indicator to all players
+      - Display "{PlayerName} is typing..." below chat
+   b. Update every 2 seconds while typing
+   c. Clear if no typing for 5 seconds
+   d. Clear when message sent
+   e. Max 3 typing indicators shown at once (show most recent)
+
+5. Chat History Management:
+   a. Store all messages in ChatHistory
+   b. Index by day number for easy retrieval
+   c. Index by player for analysis
+   d. Provide search/filter functionality:
+      - "Show all messages from Player X"
+      - "Show all messages on Day 2"
+      - "Search for keyword"
+
+6. Phase Transition Handling:
+   a. When leaving DAY_DISCUSSION:
+      - Save chat log for this day
+      - Clear typing indicators
+      - Reset message counters
+      - Disable chat input
+   b. When entering DAY_DISCUSSION:
+      - Enable chat input (for non-restricted players)
+      - Display "Day {N} Discussion" system message
+      - Reset cooldowns
+
+7. Blackmail Handling:
+   a. Blackmailer targets player at night
+   b. At day start, apply ChatRestriction:
+      - restriction_type = BLACKMAILED
+      - duration = 1 (one day phase)
+      - reason = "You have been blackmailed!"
+   c. Blackmailed player sees:
+      - Chat input disabled
+      - Red banner: "You are blackmailed! You cannot speak today."
+   d. Other players see:
+      - No indication that player is blackmailed
+      - Player just appears quiet
+   e. At end of day, remove restriction
+
+8. Defense Phase Muting:
+   a. When entering DEFENSE phase:
+      - Mute all players except accused
+      - Show "Only {AccusedName} can speak" system message
+   b. Accused player can speak (no cooldown during defense)
+   c. All others have chat input disabled
+
+9. Last Words Muting:
+   a. When entering LAST_WORDS phase:
+      - Mute all players except condemned
+      - Show "{CondemnedName}'s last words..." system message
+   b. Condemned player has 10 seconds to speak
+   c. All others have chat input disabled
+
+10. Chat Persistence:
+    a. Save chat history to game log
+    b. Allow reviewing previous days' chat
+    c. Include in post-game analysis
+    d. Export functionality (for debugging/review)
+
+UI REQUIREMENTS:
+
+Chat Window:
+  - Position: Left or bottom panel (configurable)
+  - Size: Scrollable, min 300px height
+  - Background: Semi-transparent dark (for readability)
+  - Auto-scroll to bottom when new message arrives
+
+Chat Message Display:
+  - Format: [HH:MM] PlayerName: Message
+  - Timestamp: Small gray text
+  - Player name: Bold, faction-colored (after death reveals)
+  - Message: Regular text, white
+  - System messages: Italic gray, no player name
+  - Mayor (revealed): Gold name, bold message
+
+Chat Input:
+  - Position: Bottom of chat window
+  - Placeholder: "Type a message..." (or "Blackmailed!" if blackmailed)
+  - Character counter: "X/200" (shows remaining chars)
+  - Submit: Enter key or Send button
+  - Disabled states:
+    * Grayed out when cannot speak
+    * Red border when blackmailed
+    * Tooltip explaining why disabled
+
+Typing Indicators:
+  - Position: Above chat input
+  - Format: "PlayerName is typing..."
+  - Animated dots: "..." (pulsing)
+  - Max 3 shown simultaneously
+  - Fade out after 5 seconds of inactivity
+
+Chat Controls:
+  - Scroll to bottom button (if scrolled up)
+  - Filter dropdown:
+    * "All messages"
+    * "Day 1", "Day 2", etc.
+    * "From [PlayerName]"
+  - Search bar (filter messages by keyword)
+  - Clear highlights button
+
+Cooldown Indicator:
+  - When cooldown active:
+    * Chat input disabled
+    * Countdown timer: "Wait 2s..."
+    * Progress bar showing time remaining
+
+Rate Limit Warning:
+  - After 15 messages: "You've sent 15/20 messages this phase"
+  - After 20 messages: "You've reached the message limit for this phase"
+  - Warning icon in chat input
+
+Mayor Reveal Effect:
+  - When Mayor reveals:
+    * System message: "{MayorName} has revealed themselves as the Mayor!"
+    * Mayor's name turns gold in player list
+    * Mayor's messages highlighted in gold
+    * Crown icon next to Mayor's name
+
+Blackmail Indicator:
+  - For blackmailed player:
+    * Red banner above chat: "🔇 You are blackmailed!"
+    * Chat input disabled
+    * Tooltip: "A Blackmailer has prevented you from speaking today."
+
+AI BEHAVIOR:
+
+AI Message Generation:
+  - AI uses AI Communication Generator to create messages
+  - Context includes:
+    * Current role and faction
+    * Information gathered (investigation results, observations)
+    * Current game state (who's suspicious, who's confirmed)
+    * Play style (aggressive, cautious, deceptive)
+  - Message types:
+    * Accusations: "I think Player X is suspicious"
+    * Defenses: "I'm the Sheriff, I investigated Y"
+    * Information sharing: "Player Z visited the dead person last night"
+    * Role claims: "I'm the Doctor"
+    * Voting coordination: "Let's vote up Player X"
+    * Casual talk: "This is getting intense"
+
+AI Typing Simulation:
+  - AI doesn't send messages instantly
+  - Simulates human typing speed:
+    * Base typing speed: 3-5 chars/second
+    * Thinking time: 2-5 seconds before typing
+    * Random variance: ±20%
+  - Example: 60 char message = 2s thinking + 12-20s typing = 14-22s total
+
+AI Message Timing:
+  - AI spreads messages throughout phase
+  - Doesn't send all messages in first 10 seconds
+  - Responds to other players' messages
+  - Strategic timing:
+    * Early phase: Share information, make claims
+    * Mid phase: Respond to accusations, build cases
+    * Late phase: Push for votes, final arguments
+
+AI Reaction to Messages:
+  - AI reads and processes all messages
+  - Responds to:
+    * Direct mentions: "I think AI Player is Mafia"
+    * Questions: "Who did you investigate?"
+    * Accusations: "I'm not Mafia! I'm the Doctor!"
+  - Response delay: 5-15 seconds (realistic reaction time)
+
+AI Blackmail Behavior:
+  - When blackmailed, AI stays silent
+  - AI may try to whisper instead (if Blackmailer allows whispers to be seen)
+  - Next day, AI may mention being blackmailed: "I was blackmailed yesterday"
+
+AI Play Styles:
+  - Aggressive: Frequent accusations, pushes votes
+  - Cautious: Waits for others to speak, analyzes carefully
+  - Helpful: Shares information, coordinates Town
+  - Deceptive: Makes false claims, frames others (if evil)
+  - Quiet: Speaks minimally, stays under radar
+
+VALIDATION RULES:
+
+1. Message Content Validation:
+   - Length: 1-200 characters
+   - No excessive whitespace (trim and check again)
+   - No special characters that break rendering (sanitize)
+   - No profanity (optional filter)
+
+2. Sender Validation:
+   - Sender must be valid player (ID 1-15)
+   - Sender must be alive (except for graveyard chat)
+   - Sender must not be blackmailed (for day chat)
+   - Sender must be allowed to speak in current phase
+
+3. Phase Validation:
+   - DAY_DISCUSSION: All living non-blackmailed players
+   - DEFENSE: Only accused player
+   - LAST_WORDS: Only condemned player
+   - Other phases: No day chat
+
+4. Cooldown Validation:
+   - Human player: 3 seconds since last message
+   - AI player: Simulated typing delay complete
+   - Exception: System messages have no cooldown
+
+5. Rate Limit Validation:
+   - < 20 messages per player per day phase
+   - Counter resets each new day phase
+   - System messages don't count toward limit
+
+6. Visibility Validation:
+   - Day chat visible to all living players
+   - Dead players can see but not send
+   - Message visible_to list must be valid player IDs
+
+EDGE CASES:
+
+1. Player Dies While Typing:
+   - Player typing message, then dies (lynched, killed)
+   - Solution: Discard message, disable chat input
+   - Show message: "You have died and can no longer speak in day chat"
+
+2. Player Blackmailed Mid-Phase:
+   - Rare: Witch controls Blackmailer to blackmail during day (not possible in standard game)
+   - Solution: Apply blackmail immediately, clear chat input
+
+3. Mayor Reveals During Defense:
+   - Mayor is accused, reveals during defense speech
+   - Solution: Mayor's messages turn gold immediately
+   - Continue defense phase normally
+
+4. Excessive AI Message Generation Lag:
+   - AI takes too long to generate message (LLM timeout)
+   - Solution:
+     * Set timeout (30 seconds max for message generation)
+     * If timeout, AI sends pre-generated fallback message or skips
+     * Log error for debugging
+   - Request phase extension if needed
+
+5. Chat Spam Detection:
+   - Player sends same message repeatedly
+   - Solution:
+     * Detect duplicate messages (exact match within 30 seconds)
+     * Warn player: "Don't spam the same message"
+     * Temporarily increase cooldown (10 seconds)
+
+6. Multiple Players Typing Same Name:
+   - Typing indicators show 5+ players typing simultaneously
+   - Solution: Show max 3 typing indicators
+   - Priority: Most recent typers shown first
+
+7. Chat During Phase Transition:
+   - Message submitted exactly as phase changes
+   - Solution:
+     * Server is authoritative (use server phase time)
+     * If phase changed, reject message
+     * Show error: "Phase changed, message not sent"
+
+8. Blackmailer Dies Night 1:
+   - Blackmailer blackmails target, then dies same night
+   - Solution: Blackmail still applies next day (action was successful)
+   - Blackmail removed after that day ends
+
+9. All Living Players Blackmailed:
+   - Theoretical: Blackmailer + Witch control another Blackmailer (with 2 Blackmailers in game)
+   - Solution: Allow situation, no one can talk
+   - System message: "The town is silent today..."
+
+10. Character Encoding Issues:
+    - Player types emoji or special characters
+    - Solution:
+      * Support UTF-8 encoding
+      * Render emojis properly
+      * Sanitize HTML/script tags (prevent XSS)
+
+11. Chat History Memory Limits:
+    - Long game with 1000+ messages
+    - Solution:
+      * Paginate chat history (load older messages on demand)
+      * Keep last 100 messages in memory
+      * Cache full history to disk
+
+12. AI Context Window Overflow:
+    - Too much chat for AI to process in context
+    - Solution:
+      * Summarize old messages (using LLM summarization)
+      * Keep only recent messages (last 50) in full detail
+      * Provide summary of earlier days
+      * Use Pydantic AI context management to handle window
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict
+from enum import Enum
+from datetime import datetime, timedelta
+
+class ChatType(str, Enum):
+    DAY = "day"
+    WHISPER = "whisper"
+    MAFIA = "mafia"
+    GRAVEYARD = "graveyard"
+    SYSTEM = "system"
+
+class RestrictionType(str, Enum):
+    BLACKMAILED = "blackmailed"
+    MUTED = "muted"
+    DEAD = "dead"
+
+class ChatMessage(BaseModel):
+    message_id: int
+    sender_id: int
+    sender_name: str
+    content: str = Field(min_length=1, max_length=200)
+    timestamp: datetime
+    phase: str
+    day_number: int
+    chat_type: ChatType
+    is_system: bool = False
+    visible_to: List[int]
+
+class ChatRestriction(BaseModel):
+    player_id: int
+    restriction_type: RestrictionType
+    duration: int
+    reason: str
+
+class ChatCooldown(BaseModel):
+    player_id: int
+    messages_sent_this_phase: int = 0
+    last_message_time: Optional[datetime] = None
+    cooldown_duration: timedelta = timedelta(seconds=3)
+
+    def can_send_message(self) -> bool:
+        if self.messages_sent_this_phase >= 20:
+            return False
+        if self.last_message_time is None:
+            return True
+        elapsed = datetime.now() - self.last_message_time
+        return elapsed >= self.cooldown_duration
+
+class DayChatSystem:
+    def __init__(self):
+        self.history = []
+        self.restrictions: Dict[int, List[ChatRestriction]] = {}
+        self.cooldowns: Dict[int, ChatCooldown] = {}
+
+    def send_message(self, sender_id: int, content: str, game_state) -> Optional[ChatMessage]:
+        """Attempt to send a message"""
+        # Validation
+        if not self._can_send(sender_id, game_state):
+            return None
+
+        # Create message
+        message = ChatMessage(
+            message_id=len(self.history),
+            sender_id=sender_id,
+            sender_name=game_state.get_player(sender_id).name,
+            content=content.strip(),
+            timestamp=datetime.now(),
+            phase=game_state.current_phase.phase_type,
+            day_number=game_state.day_number,
+            chat_type=ChatType.DAY,
+            visible_to=[p.player_id for p in game_state.get_living_players()]
+        )
+
+        # Update cooldown
+        self.cooldowns[sender_id].last_message_time = datetime.now()
+        self.cooldowns[sender_id].messages_sent_this_phase += 1
+
+        # Store and broadcast
+        self.history.append(message)
+        return message
+
+    def _can_send(self, sender_id: int, game_state) -> bool:
+        """Check if player can send a message"""
+        player = game_state.get_player(sender_id)
+
+        # Must be alive
+        if not player.is_alive:
+            return False
+
+        # Check restrictions
+        if sender_id in self.restrictions:
+            if any(r.restriction_type == RestrictionType.BLACKMAILED for r in self.restrictions[sender_id]):
+                return False
+
+        # Check cooldown
+        if sender_id in self.cooldowns:
+            if not self.cooldowns[sender_id].can_send_message():
+                return False
+
+        # Check phase
+        current_phase = game_state.current_phase.phase_type
+        if current_phase not in ["day_discussion"]:
+            # Special cases for defense/last words
+            if current_phase == "defense" and player.player_id != game_state.accused_player_id:
+                return False
+            if current_phase == "last_words" and player.player_id != game_state.condemned_player_id:
+                return False
+
+        return True
+```
+
+LLM Integration (Pydantic AI):
+  - Use Pydantic AI to manage context window for each AI player
+  - Context structure:
+    * System prompt: Role description, game rules
+    * Recent messages: Last 50 chat messages
+    * Game state: Living players, revealed roles, current phase
+    * AI's knowledge: Investigation results, observations
+  - Use local LLM (OSS-20B via Groq) or remote (OpenRouter)
+  - Timeout: 30 seconds for message generation
+  - Fallback: Pre-generated messages if LLM fails
+
+Performance:
+  - Message broadcast should be <10ms
+  - Support 15 concurrent message submissions (all AIs typing at once)
+  - Efficient message rendering (virtual scrolling for long chat logs)
+  - Debounce typing indicators (don't update more than once per second)

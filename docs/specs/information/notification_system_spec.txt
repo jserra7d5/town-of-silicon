@@ -1,0 +1,173 @@
+FILENAME: notification_system_spec.txt
+
+SYSTEM: Notification System
+
+DEPENDENCIES:
+- Phase Management System (notifications at phase transitions)
+- Night Action System (action feedback notifications)
+- Death System (death announcements)
+
+DATA STRUCTURES:
+
+Notification:
+  - notification_id: int
+  - recipient_id: int | "all" (specific player or everyone)
+  - priority: NotificationPriority
+  - type: NotificationType
+  - title: str
+  - message: str
+  - timestamp: datetime
+  - phase: PhaseType
+  - is_dismissible: bool
+  - auto_dismiss_seconds: int | null
+  - requires_acknowledgment: bool
+
+NotificationPriority (enum):
+  - CRITICAL: 0 (death, role reveal, game end)
+  - HIGH: 1 (investigation results, attack survival)
+  - MEDIUM: 2 (roleblock, transport)
+  - LOW: 3 (general info)
+
+NotificationType (enum):
+  - DEATH_ANNOUNCEMENT
+  - INVESTIGATION_RESULT
+  - ACTION_FEEDBACK
+  - PHASE_CHANGE
+  - ROLE_CHANGE
+  - GAME_EVENT
+  - SYSTEM_MESSAGE
+
+NOTIFICATION TYPES:
+
+Morning Announcements (Day Start):
+  - "Night {N} - {X} players died last night"
+  - Death details for each death
+  - Role reveals
+  - Wills and death notes
+
+Personal Notifications:
+  - Investigation results: "Your target is Suspicious!"
+  - Attack survival: "You were attacked but your defense was too strong!"
+  - Roleblocked: "You were roleblocked!"
+  - Transported: "You were transported!"
+  - Healed: "You were protected last night!"
+  - Controlled: (No notification - player doesn't know)
+
+Phase Change Notifications:
+  - "Night {N}" (with moon visual)
+  - "Day {N}" (with sun visual)
+  - "Trial Phase - {Accused} is on trial!"
+
+Role Change Notifications:
+  - "You have become the Godfather!" (Mafioso promotion)
+  - "You have become a Jester!" (Executioner target died)
+  - "You remembered you were a {Role}!" (Amnesiac)
+
+LOGIC FLOW:
+
+1. Notification Creation:
+   - System creates Notification object
+   - Sets priority and type
+   - Determines recipient(s)
+   - Queues for delivery
+
+2. Notification Delivery:
+   - Deliver at appropriate time (usually phase transitions)
+   - Higher priority notifications shown first
+   - Display notification UI
+
+3. Notification Display:
+   - Show notification panel/modal
+   - Format based on type and priority
+   - Play sound effect (if enabled)
+   - Wait for dismissal or auto-dismiss
+
+4. Notification History:
+   - Store all notifications
+   - Accessible via history panel
+   - Searchable and filterable
+
+UI REQUIREMENTS:
+
+Notification Panel:
+  - Modal or slide-in panel
+  - Color-coded by priority:
+    * Critical: Red background
+    * High: Yellow background
+    * Medium: Blue background
+    * Low: Gray background
+  - Title (bold, large)
+  - Message (body text)
+  - Icon based on type
+  - Dismiss button (if dismissible)
+
+Notification Queue:
+  - Multiple notifications shown sequentially
+  - Critical notifications block (must acknowledge)
+  - Others can be queued
+
+Notification History:
+  - Button: "📋 Notifications"
+  - List of all received notifications
+  - Grouped by night/day
+  - Click to expand details
+
+AI BEHAVIOR:
+
+AI Notification Processing:
+  - AI reads all notifications
+  - Updates knowledge base
+  - Uses for decision-making
+  - May reference in chat
+
+VALIDATION RULES:
+
+1. Recipient must be valid player or "all"
+2. Priority must be valid enum value
+3. Message cannot be empty
+
+EDGE CASES:
+
+1. Multiple Notifications Same Time:
+   - Queue and show sequentially
+   - Prioritize by priority level
+
+2. Player Dies During Notification:
+   - Still show notification, then death
+
+IMPLEMENTATION:
+
+```python
+class NotificationPriority(IntEnum):
+    CRITICAL = 0
+    HIGH = 1
+    MEDIUM = 2
+    LOW = 3
+
+class Notification(BaseModel):
+    notification_id: int
+    recipient_id: int | str  # player ID or "all"
+    priority: NotificationPriority
+    type: str
+    title: str
+    message: str
+    timestamp: datetime
+    is_dismissible: bool = True
+
+class NotificationSystem:
+    def __init__(self):
+        self.queue: List[Notification] = []
+        self.history: List[Notification] = []
+
+    def send_notification(self, notification: Notification):
+        self.queue.append(notification)
+        self.history.append(notification)
+        # Sort queue by priority
+        self.queue.sort(key=lambda n: n.priority)
+
+    def get_next_notification(self, player_id: int) -> Optional[Notification]:
+        for notif in self.queue:
+            if notif.recipient_id == player_id or notif.recipient_id == "all":
+                return notif
+        return None
+```

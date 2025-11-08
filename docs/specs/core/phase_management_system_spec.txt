@@ -1,0 +1,519 @@
+FILENAME: phase_management_system_spec.txt
+
+SYSTEM: Phase Management System
+
+DEPENDENCIES:
+- Role Assignment System (must complete before first phase begins)
+- Death System (checks for phase transitions based on deaths)
+- Victory Condition System (checks for game end after each phase)
+- Voting System (manages voting phase transitions)
+
+DATA STRUCTURES:
+
+GamePhase:
+  - phase_type: PhaseType
+  - phase_number: int (which day/night cycle)
+  - start_time: float (timestamp)
+  - duration: float (seconds)
+  - remaining_time: float (seconds, updated by tick)
+  - can_extend: bool (some phases can be extended)
+  - auto_advance: bool (advance when timer expires vs. manual)
+
+PhaseType (enum):
+  - PREGAME: "pregame"
+  - DAY_DISCUSSION: "day_discussion"
+  - DAY_VOTING: "day_voting"
+  - DEFENSE: "defense"
+  - JUDGMENT: "judgment"
+  - JUDGMENT_RESULTS: "judgment_results"
+  - LAST_WORDS: "last_words"
+  - NIGHT: "night"
+  - POSTGAME: "postgame"
+
+PhaseTransition:
+  - from_phase: PhaseType
+  - to_phase: PhaseType
+  - trigger: TransitionTrigger
+  - conditions: List[TransitionCondition]
+
+TransitionTrigger (enum):
+  - TIMER_EXPIRED: Timer reached 0
+  - VOTE_THRESHOLD: Required votes reached
+  - ALL_ACTIONS_SUBMITTED: All living players submitted night actions
+  - MANUAL_ADVANCE: Player/system forced transition
+  - GAME_END: Victory condition met
+
+TransitionCondition:
+  - type: "vote_exists" | "player_on_trial" | "actions_ready" | "no_winner"
+  - required: bool
+
+PhaseConfig:
+  - phase_type: PhaseType
+  - base_duration: float (default duration in seconds)
+  - min_duration: float (cannot be shorter than this)
+  - max_duration: float (cannot be longer than this)
+  - allow_ai_extension: bool (AIs can request more time)
+  - extension_increment: float (how much time to add)
+  - max_extensions: int (how many times can extend)
+
+GameClock:
+  - current_phase: GamePhase
+  - day_number: int
+  - night_number: int
+  - total_ticks: int (game tick counter)
+  - tick_rate: float (time between ticks, e.g., 0.1s)
+  - phase_history: List[GamePhase]
+
+PHASE CONFIGURATIONS:
+
+Default Durations:
+  PREGAME: 3.0 seconds (brief transition)
+  DAY_DISCUSSION: 45.0 seconds (can extend for AI responses)
+  DAY_VOTING: 30.0 seconds
+  DEFENSE: 20.0 seconds
+  JUDGMENT: 20.0 seconds
+  JUDGMENT_RESULTS: 5.0 seconds
+  LAST_WORDS: 10.0 seconds
+  NIGHT: 30.0 seconds (can extend for AI responses)
+  POSTGAME: infinite (until player exits)
+
+AI Extension Rules:
+  DAY_DISCUSSION:
+    - allow_ai_extension: true
+    - extension_increment: 5.0 seconds
+    - max_extensions: 6 (max 75 seconds total)
+    - trigger: AI has not finished typing message
+
+  NIGHT:
+    - allow_ai_extension: true
+    - extension_increment: 10.0 seconds
+    - max_extensions: 3 (max 60 seconds total)
+    - trigger: AI has not submitted night action
+
+LOGIC FLOW:
+
+1. Game Initialization:
+   a. Create GameClock with current_phase=PREGAME
+   b. Initialize day_number=0, night_number=0
+   c. Load PhaseConfig for all phase types
+   d. Set tick_rate (0.1s recommended for responsive UI)
+
+2. Game Start Sequence:
+   a. PREGAME phase (3 seconds)
+      - Display "Night 1" transition
+      - Initialize all game systems
+      - Send role information to all players
+   b. Transition to NIGHT (first night)
+      - Increment night_number to 1
+      - Start night action collection
+
+3. Main Game Loop:
+   while no victory condition met:
+     a. Execute current phase
+     b. Tick timer (decrease remaining_time)
+     c. Check for transition conditions
+     d. If transition triggered:
+        i. Execute phase cleanup
+        ii. Determine next phase
+        iii. Execute phase setup
+        iv. Update current_phase
+
+4. Phase Tick System:
+   Every tick_rate seconds:
+   a. Decrease current_phase.remaining_time by tick_rate
+   b. Update UI timer display
+   c. Check for AI extension requests:
+      - If AI needs more time AND extensions available:
+        * Add extension_increment to remaining_time
+        * Decrement extensions_remaining
+        * Show "[AI Name] needs more time..." message
+   d. If remaining_time <= 0:
+      - Trigger phase transition
+   e. Process any queued events (deaths, announcements, etc.)
+
+5. Day Phase Sequence:
+   NIGHT → DAY_DISCUSSION → DAY_VOTING → DEFENSE → JUDGMENT →
+   JUDGMENT_RESULTS → LAST_WORDS → NIGHT
+
+   DAY_DISCUSSION (45s base):
+     - Players can chat publicly
+     - Players can whisper privately
+     - Players can accuse others (triggers voting)
+     - If player accused AND majority reached:
+       → Transition to DEFENSE
+     - If timer expires with no valid vote:
+       → Transition to NIGHT
+
+   DAY_VOTING (30s):
+     - Only active if accusation made
+     - Players vote guilty/innocent/abstain
+     - If votes submitted early, can advance early
+     - Timer expires → count votes → JUDGMENT_RESULTS
+
+   DEFENSE (20s):
+     - Accused player can speak
+     - All other players muted
+     - Cannot be skipped (full duration)
+     - Timer expires → JUDGMENT
+
+   JUDGMENT (20s):
+     - All players (except accused) vote guilty/innocent/abstain
+     - Can advance early if all votes submitted
+     - Timer expires → JUDGMENT_RESULTS
+
+   JUDGMENT_RESULTS (5s):
+     - Display vote tally
+     - Announce "guilty" or "innocent" verdict
+     - If guilty → LAST_WORDS
+     - If innocent → DAY_DISCUSSION (resume discussion)
+
+   LAST_WORDS (10s):
+     - Condemned player can speak
+     - All other players muted
+     - Timer expires → execute player → NIGHT
+
+6. Night Phase Sequence:
+   NIGHT (30s base):
+     - All public chat disabled
+     - Mafia can communicate in Mafia chat
+     - Dead players can communicate in dead chat
+     - Living players submit night actions
+     - If all actions submitted early:
+       * Can advance early (optional, for faster games)
+     - Timer expires → resolve night actions → DAY_DISCUSSION
+
+7. Phase Transition Logic:
+   def determine_next_phase(current: PhaseType, context: GameContext) -> PhaseType:
+     match current:
+       case PREGAME:
+         return NIGHT
+
+       case NIGHT:
+         return DAY_DISCUSSION
+
+       case DAY_DISCUSSION:
+         if context.valid_vote_exists:
+           return DEFENSE
+         else:
+           return NIGHT
+
+       case DEFENSE:
+         return JUDGMENT
+
+       case JUDGMENT:
+         return JUDGMENT_RESULTS
+
+       case JUDGMENT_RESULTS:
+         if context.verdict == "guilty":
+           return LAST_WORDS
+         else:
+           return DAY_DISCUSSION
+
+       case LAST_WORDS:
+         return NIGHT
+
+       case _:
+         raise UnexpectedPhaseError
+
+8. Phase Setup Actions:
+   When entering each phase:
+
+   NIGHT:
+     - Increment night_number
+     - Display "Night {night_number}" transition
+     - Enable Mafia chat
+     - Enable dead chat
+     - Request night actions from all living players
+     - Play night ambient sound
+
+   DAY_DISCUSSION:
+     - Increment day_number
+     - Resolve previous night's actions (if any)
+     - Display death announcements
+     - Display role reveals for dead players
+     - Enable public day chat
+     - Reset vote tracker
+     - Play day ambient sound
+
+   DEFENSE:
+     - Mute all players except accused
+     - Display "{accused} is on trial for conspiracy against the Town!"
+     - Start defense timer
+
+   JUDGMENT:
+     - Mute all players
+     - Display "The town will now vote"
+     - Show voting UI to all players except accused
+
+   JUDGMENT_RESULTS:
+     - Display vote breakdown (X guilty, Y innocent, Z abstained)
+     - Calculate verdict (guilty if guilty > innocent)
+     - Announce verdict
+
+   LAST_WORDS:
+     - Mute all players except condemned
+     - Display "{condemned}'s last words..."
+
+9. Phase Cleanup Actions:
+   When leaving each phase:
+
+   DAY_DISCUSSION:
+     - Save chat log for this day
+     - Clear typing indicators
+
+   NIGHT:
+     - Process and resolve all night actions
+     - Generate death announcements for next day
+     - Clear night action queue
+
+   JUDGMENT:
+     - Finalize vote count
+     - Record votes in game history
+
+UI REQUIREMENTS:
+
+Phase Indicator (always visible):
+  - Large banner showing current phase name
+  - Color coding:
+    * Day phases: Yellow/Gold background
+    * Night phase: Dark blue/purple background
+    * Trial phases: Red background
+  - Phase number display: "Day 2" or "Night 3"
+  - Timer countdown in format "0:45" (MM:SS)
+  - Visual timer bar (depleting progress bar)
+
+Phase Transitions:
+  - Smooth fade out/in transition (0.5s)
+  - Display phase name in large text
+  - Brief animation (e.g., sun rising for day, moon for night)
+  - Sound effect for phase change
+
+Timer Warning:
+  - When timer < 10 seconds: Timer turns red
+  - When timer < 5 seconds: Timer pulses
+  - Audio tick at 5, 4, 3, 2, 1 seconds (optional)
+
+Extension Notification:
+  - When AI requests extension:
+    * Small notification: "⏱️ [AI Name] needs more time..."
+    * Brief timer pause animation
+    * Show extended time added
+
+Phase Context Display:
+  - Day Discussion: "Discuss who seems suspicious"
+  - Defense: "[Player Name] is on trial!"
+  - Judgment: "Vote on [Player Name]'s fate"
+  - Night: "Submit your night action"
+
+AI BEHAVIOR:
+
+AI Time Management:
+  - Each AI tracks current phase
+  - AI estimates time needed for:
+    * Generating chat messages
+    * Deciding votes
+    * Choosing night actions
+  - If time insufficient, request extension
+
+AI Phase Awareness:
+  - AI knows which phases allow which actions:
+    * DAY_DISCUSSION: Can chat, whisper, vote
+    * DEFENSE: Only accused AI can speak
+    * JUDGMENT: Only vote (if not accused)
+    * NIGHT: Can use night ability
+  - AI Context Management receives phase updates
+
+AI Response Timing:
+  - Simulate realistic typing delays:
+    * Short message (< 20 chars): 1-3 seconds
+    * Medium message (20-60 chars): 3-6 seconds
+    * Long message (60+ chars): 6-12 seconds
+  - Add random variance (±20%)
+  - Don't submit all actions instantly at night start
+
+AI Extension Request Logic:
+  def should_request_extension(ai: AIPlayer, phase: GamePhase) -> bool:
+    time_needed = ai.estimate_time_for_action()
+    buffer = 5.0  # seconds buffer
+    return time_needed + buffer > phase.remaining_time
+
+VALIDATION RULES:
+
+1. Phase Transition Validation:
+   - Current phase must be completable (no stuck states)
+   - Next phase must be valid successor
+   - Required conditions must be met (e.g., player_on_trial for DEFENSE)
+
+2. Timer Validation:
+   - remaining_time must be >= 0
+   - duration must be >= min_duration and <= max_duration
+   - Extensions cannot exceed max_extensions
+
+3. Phase Order Validation:
+   - Cannot skip required phases (e.g., DEFENSE → NIGHT is invalid)
+   - Cannot return to previous phase (except DAY_DISCUSSION from JUDGMENT_RESULTS)
+
+4. Action Validation:
+   - Players cannot submit actions invalid for current phase
+   - Night actions only during NIGHT phase
+   - Votes only during valid voting phases
+   - Chat only during phases that allow it
+
+5. Game State Validation:
+   - Check victory conditions after NIGHT and JUDGMENT_RESULTS
+   - Ensure at least 1 living player (error if all dead)
+   - Verify phase history is consistent
+
+EDGE CASES:
+
+1. All Players Dead:
+   - Rare but possible (e.g., simultaneous kills)
+   - Solution: Immediately transition to POSTGAME
+   - Display "Everyone died! Draw game."
+
+2. Last Living Players Die During Trial:
+   - Player lynched, leaving only 1-2 players who kill each other that night
+   - Solution: Check victory conditions after JUDGMENT_RESULTS
+   - End game if victory condition met
+
+3. AI Extension Spam:
+   - AI repeatedly requests extensions
+   - Solution: Enforce max_extensions limit
+   - Log excessive extension requests (possible AI bug)
+
+4. Timer Desync:
+   - Client/server timer mismatch (in networked version)
+   - Solution: Server is authoritative
+   - Client displays server-provided remaining_time
+
+5. Phase Transition During Action:
+   - Player typing message when phase ends
+   - Solution: Save draft message, disable during incompatible phases
+   - Restore draft when phase allows chat again
+
+6. First Night Special Rules:
+   - Some roles cannot act Night 1 (e.g., Jailor cannot execute)
+   - Werewolf does not transform Night 1 (not full moon)
+   - Solution: Pass night_number to action validation
+
+7. No Valid Transitions:
+   - Game stuck in invalid state
+   - Solution: Implement emergency phase reset
+   - Log error and force transition to nearest valid phase
+
+8. Rapid Phase Changes:
+   - Multiple phase transitions queued (e.g., fast voting)
+   - Solution: Process transitions sequentially
+   - Queue transitions, execute one per tick
+
+9. Victory During Non-Standard Phase:
+   - All Mafia killed during day (via Veteran, Bodyguard, etc.)
+   - Solution: Check victory conditions at end of every phase
+   - Immediately transition to POSTGAME if victory achieved
+
+10. Human Player Disconnect/Timeout:
+    - Human player doesn't respond during their phase (DEFENSE, LAST_WORDS)
+    - Solution: Phase continues normally, timer expires as usual
+    - Auto-submit default action (e.g., abstain, no action)
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from enum import Enum
+from typing import List, Optional, Callable
+from datetime import datetime
+
+class PhaseType(str, Enum):
+    PREGAME = "pregame"
+    DAY_DISCUSSION = "day_discussion"
+    DAY_VOTING = "day_voting"
+    DEFENSE = "defense"
+    JUDGMENT = "judgment"
+    JUDGMENT_RESULTS = "judgment_results"
+    LAST_WORDS = "last_words"
+    NIGHT = "night"
+    POSTGAME = "postgame"
+
+class GamePhase(BaseModel):
+    phase_type: PhaseType
+    phase_number: int
+    start_time: datetime
+    duration: float
+    remaining_time: float
+    extensions_used: int = 0
+    extensions_available: int = 3
+
+class PhaseConfig(BaseModel):
+    phase_type: PhaseType
+    base_duration: float
+    min_duration: float
+    max_duration: float
+    allow_ai_extension: bool = False
+    extension_increment: float = 5.0
+    max_extensions: int = 3
+
+class GameClock(BaseModel):
+    current_phase: GamePhase
+    day_number: int = 0
+    night_number: int = 0
+    total_ticks: int = 0
+    tick_rate: float = 0.1
+    phase_history: List[GamePhase] = []
+
+class PhaseManager:
+    def __init__(self, config: dict[PhaseType, PhaseConfig]):
+        self.config = config
+        self.clock = GameClock(current_phase=self._create_phase(PhaseType.PREGAME))
+
+    def tick(self, delta_time: float):
+        """Main game loop tick"""
+        self.clock.total_ticks += 1
+        self.clock.current_phase.remaining_time -= delta_time
+
+        if self.clock.current_phase.remaining_time <= 0:
+            self._transition_phase()
+
+    def request_extension(self, ai_id: int) -> bool:
+        """AI requests more time for current phase"""
+        phase = self.clock.current_phase
+        config = self.config[phase.phase_type]
+
+        if not config.allow_ai_extension:
+            return False
+        if phase.extensions_used >= config.max_extensions:
+            return False
+
+        phase.remaining_time += config.extension_increment
+        phase.extensions_used += 1
+        return True
+
+    def _transition_phase(self):
+        """Transition to next phase"""
+        next_phase_type = self._determine_next_phase()
+        self._cleanup_phase(self.clock.current_phase)
+
+        new_phase = self._create_phase(next_phase_type)
+        self.clock.phase_history.append(self.clock.current_phase)
+        self.clock.current_phase = new_phase
+
+        self._setup_phase(new_phase)
+```
+
+Tick System Design:
+  - Use fixed timestep for determinism
+  - Update at 10 Hz (0.1s tick rate) for responsive UI
+  - Accumulate delta time for variable frame rates
+  - Process all game logic on tick boundaries
+
+Event Queue:
+  - Queue phase transitions (don't execute immediately)
+  - Process one transition per tick
+  - Ensures stable game state during transitions
+
+Performance:
+  - Phase transitions should complete in <50ms
+  - Timer updates should be lightweight
+  - Cache phase configurations
+  - Use event system for phase change notifications

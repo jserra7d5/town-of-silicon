@@ -1,0 +1,256 @@
+FILENAME: information_display_ui_spec.txt
+
+SYSTEM: Information Display UI
+
+DEPENDENCIES:
+- Role Assignment System (role card display)
+- Player List Display (player list)
+- Death System (graveyard)
+- Day Chat System (chat log)
+
+UI COMPONENTS:
+
+RoleCard:
+  - Location: Top-left or expandable sidebar
+  - Shows:
+    * Role name (large, faction-colored)
+    * Alignment/Category
+    * Ability description
+    * Attack/Defense values
+    * Special immunities
+  - Collapsible (minimize to icon)
+
+PlayerList:
+  - Location: Right sidebar
+  - Shows 15 players:
+    * Position number
+    * Name
+    * Status (alive/dead)
+    * Revealed role (if applicable)
+    * Vote count (if being voted)
+  - Clickable for actions
+
+ChatLog:
+  - Location: Bottom or left panel
+  - Shows:
+    * Day chat messages
+    * Whispers (separate tab)
+    * System messages
+  - Auto-scrolls to latest
+  - Scrollable history
+
+Graveyard:
+  - Location: Tab or separate panel
+  - Shows all dead players:
+    * Name
+    * Role
+    * Day/Night died
+    * Last will
+  - Chronological order
+
+NotificationPanel:
+  - Location: Center (modal) or top banner
+  - Shows:
+    * Investigation results
+    * Attack notifications
+    * Phase changes
+  - Dismissible or auto-dismiss
+
+LAYOUTS:
+
+Main Game Screen:
+```
+┌────────────────────────────────────────────────┐
+│ [Role Card]        TOWN OF SALEM   Night 3     │
+├──────────────────────────────────────┬─────────┤
+│                                      │ PLAYERS │
+│    Chat Log                          │ ────────│
+│    ────────                          │ 1. John │
+│    [10:23] John: I'm the Sheriff     │ 2. Sarah│
+│    [10:24] Sarah: Vote Player 3      │ 3. Will │
+│    [10:25] You: I agree              │ ...     │
+│                                      │         │
+│                                      │ [Vote]  │
+│    [Type message_____]  [Send]       │ [Whis]  │
+└──────────────────────────────────────┴─────────┘
+```
+
+Role Card (Expanded):
+```
+┌─────────────────────────────┐
+│ ★ SHERIFF                   │
+│ Town Investigative          │
+├─────────────────────────────┤
+│ Check if target is          │
+│ suspicious (Mafia, Serial   │
+│ Killer, or Werewolf)        │
+│                             │
+│ Attack: None                │
+│ Defense: None               │
+│                             │
+│ Note: Godfather appears     │
+│ "Not Suspicious"            │
+│                             │
+│ [Collapse]                  │
+└─────────────────────────────┘
+```
+
+Graveyard Panel:
+```
+┌────────────────────────────┐
+│ GRAVEYARD                  │
+├────────────────────────────┤
+│ Night 1:                   │
+│  ☠ James Bayley            │
+│     Role: Investigator     │
+│     Will: "N1: Checked..." │
+│                            │
+│ Day 2:                     │
+│  ☠ Mary Warren             │
+│     Role: Mafioso          │
+│     Will: "I'm Doctor"     │
+│     (LYNCHED)              │
+│                            │
+│ [Close]                    │
+└────────────────────────────┘
+```
+
+Notification (Investigation Result):
+```
+┌─────────────────────────────┐
+│ 🔍 Investigation Result     │
+├─────────────────────────────┤
+│ Your target is SUSPICIOUS!  │
+│                             │
+│ Target: William Hobbs       │
+│ Night: 3                    │
+│                             │
+│ [OK]                        │
+└─────────────────────────────┘
+```
+
+COLOR SCHEME:
+
+Faction Colors:
+  - Town: #00AA00 (green)
+  - Mafia: #CC0000 (red)
+  - Neutral: #888888 (gray)
+  - Unknown: #FFFFFF (white)
+
+Phase Colors:
+  - Day: #FFD700 (gold/yellow)
+  - Night: #1E3A8A (dark blue)
+  - Trial: #CC0000 (red)
+
+Status Colors:
+  - Alive: Full brightness
+  - Dead: 50% opacity, gray
+  - On Trial: Red highlight
+  - Voting: Yellow highlight
+
+RESPONSIVE STATES:
+
+Day Phase:
+  - Chat enabled
+  - Vote buttons active
+  - Whisper available
+  - Role card visible
+
+Night Phase:
+  - Chat disabled (grayed out)
+  - Action panel visible
+  - Mafia chat (if Mafia)
+  - Role card visible
+
+Trial Phase:
+  - Accused highlighted
+  - Judgment buttons active
+  - Chat limited (defense/last words)
+
+Game End:
+  - Victory screen overlay
+  - Final role reveals
+  - Statistics panel
+  - Play Again / Main Menu buttons
+
+INTERACTIONS:
+
+Role Card:
+  - Click to expand/collapse
+  - Hover shows quick tooltip
+  - Always accessible (shortcut: R key)
+
+Player List:
+  - Click player name: Context menu (Vote, Whisper, Target)
+  - Hover: Show detailed info
+  - Right-click: Advanced options
+
+Chat Log:
+  - Scroll to view history
+  - Click message: Highlight sender in player list
+  - Filter by day/player (search function)
+
+Graveyard:
+  - Click dead player: Show full death info and will
+  - Sortable (by day, by role, by faction)
+  - Search function
+
+ACCESSIBILITY:
+
+- All text readable (min 12px font)
+- High contrast mode (black/white)
+- Colorblind mode (patterns in addition to colors)
+- Screen reader labels
+- Keyboard shortcuts for all actions
+
+IMPLEMENTATION:
+
+React Component Structure:
+```jsx
+function GameScreen() {
+  return (
+    <div className="game-screen">
+      <Header gameState={gameState} />
+      <div className="main-content">
+        <ChatPanel messages={messages} />
+        <PlayerList players={players} />
+      </div>
+      <ActionPanel currentPhase={phase} />
+      <RoleCard role={playerRole} />
+      {notification && <NotificationModal notification={notification} />}
+    </div>
+  );
+}
+```
+
+State Management:
+```javascript
+const gameState = {
+  phase: "day_discussion",
+  dayNumber: 3,
+  nightNumber: 2,
+  players: [...],
+  deadPlayers: [...],
+  messages: [...],
+  notifications: [...]
+};
+```
+
+EDGE CASES:
+
+1. Long Player Names:
+   - Truncate to 15 characters
+   - Show full name on hover
+
+2. Many Dead Players:
+   - Graveyard scrollable
+   - Collapse old deaths
+
+3. Chat Flood:
+   - Virtual scrolling for performance
+   - Load older messages on demand
+
+4. Small Screens:
+   - Responsive layout
+   - Collapsible panels
+   - Swipe gestures

@@ -1,0 +1,737 @@
+FILENAME: night_action_system_spec.txt
+
+SYSTEM: Night Action System
+
+DEPENDENCIES:
+- Phase Management System (actions submitted during NIGHT phase)
+- Role Assignment System (role determines available actions)
+- Death System (many actions cause death)
+- Death Note System (some kills include death notes)
+- Investigation Result System (investigative actions generate results)
+
+DATA STRUCTURES:
+
+NightAction:
+  - action_id: int
+  - actor_id: int (who is performing the action)
+  - actor_role: str
+  - target_id: int | null (who is being targeted, null for self-actions)
+  - secondary_target_id: int | null (for actions like Transport requiring 2 targets)
+  - action_type: ActionType
+  - priority: int (lower = resolves first)
+  - night_number: int
+  - submitted: bool
+  - result: ActionResult | null (set after resolution)
+  - was_roleblocked: bool
+  - was_controlled: bool (Witch)
+  - controller_id: int | null (Witch who controlled)
+  - death_note: str | null (for kill actions)
+
+ActionType (enum):
+  - KILL: "kill" (Mafia, Serial Killer, Vigilante)
+  - PROTECT: "protect" (Doctor, Bodyguard)
+  - INVESTIGATE: "investigate" (Sheriff, Investigator)
+  - WATCH: "watch" (Lookout)
+  - JAIL: "jail" (Jailor)
+  - EXECUTE: "execute" (Jailor execution)
+  - ROLEBLOCK: "roleblock" (Escort, Consort)
+  - TRANSPORT: "transport" (Transporter)
+  - ALERT: "alert" (Veteran)
+  - HEAL: "heal" (Doctor)
+  - GUARD: "guard" (Bodyguard)
+  - CONTROL: "control" (Witch)
+  - DOUSE: "douse" (Arsonist)
+  - IGNITE: "ignite" (Arsonist)
+  - CLEAN: "clean" (Janitor)
+  - FORGE: "forge" (Forger)
+  - BLACKMAIL: "blackmail" (Blackmailer)
+  - VEST: "vest" (Survivor)
+  - DISGUISE: "disguise" (Disguiser)
+
+ActionResult:
+  - success: bool
+  - message: str (feedback to actor)
+  - discovered_info: Dict (for investigative actions)
+  - caused_death: bool
+  - was_blocked: bool
+  - special_events: List[str] (e.g., "attacked_veteran", "healed")
+
+ActionPriority (resolution order, lower = first):
+  PRIORITY_0 = 0   # Veteran alert, Bodyguard guard (defensive setup)
+  PRIORITY_1 = 1   # Witch control, Transporter swap
+  PRIORITY_2 = 2   # Roleblock (Escort, Consort)
+  PRIORITY_3 = 3   # Protective actions (Doctor heal, Jail)
+  PRIORITY_4 = 4   # Investigative actions (Sheriff, Investigator, Lookout)
+  PRIORITY_5 = 5   # Kills (Mafia, Serial Killer, Vigilante)
+  PRIORITY_6 = 6   # Arsonist douse/ignite
+  PRIORITY_7 = 7   # Janitor clean, Forger forge
+  PRIORITY_8 = 8   # Blackmail
+
+AttackDefenseValue:
+  NONE = 0
+  BASIC = 1
+  POWERFUL = 2
+  UNSTOPPABLE = 3
+  INVINCIBLE = 4
+
+NightActionQueue:
+  - actions: List[NightAction]
+  - sorted_actions: List[NightAction] (sorted by priority)
+  - all_submitted: bool
+  - resolution_started: bool
+
+RoleblockImmunity:
+  - role: str
+  - is_immune: bool
+  - reason: str
+
+ControlImmunity:
+  - role: str
+  - is_immune: bool
+
+NIGHT ACTION RULES:
+
+Roleblock Mechanics:
+  - Escort/Consort can roleblock one target
+  - Roleblocked player's action fails (doesn't execute)
+  - Roleblock-immune roles: Jailor, Serial Killer (kills rolebloc
+
+ker), Werewolf
+  - Serial Killer kills roleblocking Escort/Consort
+  - Werewolf kills roleblocking Escort/Consort (on full moon)
+
+Witch Control:
+  - Witch selects two targets: controller and victim
+  - Forces controller to use their action on victim
+  - Overrides controller's original target
+  - Works on most roles (exceptions: Jailor, Veteran on alert)
+  - Controlled player doesn't know they were controlled
+
+Transporter Swap:
+  - Transporter swaps two players' positions
+  - Any action targeting Player A affects Player B and vice versa
+  - Affects all actions: kills, protection, investigation, etc.
+  - Both players receive notification: "You were transported!"
+
+Jail Mechanics:
+  - Jailor jails one target
+  - Jailed player is roleblocked (cannot perform action)
+  - Jailed player has powerful defense (protected from kills)
+  - Jailor can execute jailed player (unstoppable attack)
+  - Jailor can speak with jailed player in Jail Chat
+  - If Jailor executes Town, Jailor loses execution power permanently
+
+Veteran Alert:
+  - Veteran goes on alert (3 uses total)
+  - Kills ALL visitors with basic attack
+  - Visitors include: killers, investigators, protectors, etc.
+  - Veteran has basic defense while on alert
+  - Town roles can die to Veteran (risky for Town)
+
+Bodyguard/Doctor:
+  - Doctor heals target, gives basic defense
+  - Bodyguard guards target, gives powerful defense
+  - Bodyguard kills one attacker (counterattack)
+  - Both Bodyguard and attacker die
+  - Bodyguard has 1 self-heal (can protect self once)
+
+Serial Killer:
+  - Kills target with basic attack
+  - Has basic defense
+  - Immune to roleblock (kills roleblocking Escort)
+  - Cautious mode (optional): Stays home, doesn't attack (not implemented in base game)
+
+Arsonist:
+  - Can douse target in gasoline OR ignite
+  - Douse: Marks target as doused (doesn't kill yet)
+  - Ignite: Kills ALL doused targets simultaneously
+  - Ignite is powerful attack
+  - Has basic defense
+
+Werewolf:
+  - Only transforms on full moon nights (every 2-3 nights)
+  - Kills target AND all visitors to target
+  - Basic attack
+  - Has basic defense
+  - Cannot act on non-full moon nights
+
+Lookout:
+  - Watches target's house
+  - Sees all players who visit target that night
+  - Receives list of visitor names
+
+Sheriff:
+  - Interrogates target
+  - Result: "Suspicious" (Mafia, Serial Killer, Werewolf) or "Not Suspicious" (Town, Neutral)
+  - Cannot detect Godfather (appears "Not Suspicious")
+  - Cannot detect Executioner, Jester (appear "Not Suspicious")
+
+Investigator:
+  - Investigates target for role
+  - Receives set of 3 possible roles
+  - Example: "Sheriff, Executioner, or Werewolf"
+  - Gives more specific info than Sheriff
+
+Janitor:
+  - Cleans a Mafia kill
+  - Hides victim's role and will from Town
+  - Janitor and Mafia learn actual role
+  - 3 uses total
+
+Forger:
+  - Forges target's will
+  - When target dies, forged will is shown instead of real will
+  - 3 uses total
+
+Blackmailer:
+  - Blackmails target
+  - Target cannot speak during next day phase
+  - Blackmailer sees all whispers
+
+LOGIC FLOW:
+
+1. Night Phase Start:
+   a. Phase Management transitions to NIGHT
+   b. Initialize NightActionQueue (empty actions list)
+   c. Request actions from all living players
+   d. Start night timer (30 seconds base, extendable)
+
+2. Action Submission (Human Player):
+   a. Player sees action selection UI
+   b. Player selects target(s) from living players list
+   c. For kill roles: Option to write death note
+   d. Player clicks "Submit Action"
+   e. Validate action (valid target, has ability, etc.)
+   f. Create NightAction object
+   g. Add to NightActionQueue
+   h. Mark player's action as submitted
+   i. Show confirmation: "Action submitted"
+
+3. Action Submission (AI Player):
+   a. AI Decision Engine determines action:
+      - Who to target (based on role, strategy, information)
+      - Use ability or skip night
+   b. AI generates action
+   c. Simulate thinking delay (2-10 seconds)
+   d. Submit action to NightActionQueue
+
+4. All Actions Submitted Check:
+   a. Every tick, check if all living players submitted
+   b. If all submitted AND 5+ seconds remaining:
+      - Option: "All actions submitted. Advance night?" (for faster games)
+      - OR: Auto-advance when timer expires (standard)
+   c. If timer expires:
+      - Players who didn't submit get "no action" (skip night)
+      - Proceed to resolution
+
+5. Action Priority Sorting:
+   a. When all actions submitted or timer expires
+   b. Sort actions by priority (ascending):
+      - Priority 0 (Veteran alert, Bodyguard)
+      - Priority 1 (Witch, Transporter)
+      - Priority 2 (Roleblock)
+      - ... up to Priority 8
+   c. Within same priority, resolve in random order (or by submission order)
+
+6. Action Resolution (Main Loop):
+   For each action in sorted order:
+   a. Check if actor is alive (dead players' actions fail)
+   b. Check if actor is roleblocked:
+      - If yes and not immune: Skip action, set was_roleblocked=true
+   c. Check if action was redirected (Witch control, Transport swap)
+   d. Execute action logic (see specific action resolution below)
+   e. Generate result and feedback
+   f. Apply consequences (death, healing, etc.)
+   g. Store result in NightAction.result
+
+7. Witch Control Resolution (Priority 1):
+   a. Witch selects controller and victim
+   b. Find controller's action in queue
+   c. Override target_id with victim
+   d. Set was_controlled=true on controller's action
+   e. Controller uses their action on new target (unknowingly)
+
+8. Transporter Swap Resolution (Priority 1):
+   a. Transporter swaps Player A and Player B
+   b. For all actions targeting A: Redirect to B
+   c. For all actions targeting B: Redirect to A
+   d. Both A and B receive notification: "You were transported!"
+
+9. Roleblock Resolution (Priority 2):
+   a. Escort/Consort targets player
+   b. Check if target is roleblock-immune:
+      - Serial Killer: Yes (kills Escort)
+      - Werewolf: Yes (kills Escort if full moon)
+      - Jailor: Yes (immune)
+   c. If not immune:
+      - Find target's action in queue
+      - Set was_roleblocked=true
+      - Action will be skipped when its turn comes
+   d. If Serial Killer/Werewolf:
+      - Kill Escort/Consort
+      - Escort's roleblock still fails
+
+10. Jail Resolution (Priority 3):
+    a. Jailor jails target
+    b. Target is roleblocked (action fails)
+    c. Target gains powerful defense for the night
+    d. Jailor can choose to execute (separate action)
+
+11. Execution Resolution (Priority 3):
+    a. If Jailor chose to execute jailed target
+    b. Unstoppable attack (ignores all defense)
+    c. Target dies
+    d. If target was Town:
+       - Jailor loses execution power permanently
+       - Jailor can still jail but not execute
+
+12. Protective Action Resolution (Priority 3):
+    a. Doctor heals target:
+       - Target gains basic defense for this night
+    b. Bodyguard guards target:
+       - Target gains powerful defense
+       - If target attacked, Bodyguard counterattacks
+       - Both attacker and Bodyguard die (unless Bodyguard uses self-heal)
+
+13. Investigative Action Resolution (Priority 4):
+    a. Sheriff interrogates target:
+       - Check target's role against suspicious list
+       - Return "Suspicious" or "Not Suspicious"
+    b. Investigator investigates target:
+       - Return set of 3 possible roles based on target's actual role
+    c. Lookout watches target:
+       - Record all players who visit target this night
+       - Return list of visitors
+
+14. Kill Action Resolution (Priority 5):
+    a. Killer targets victim
+    b. Check if victim is protected:
+       - Compare attack value to defense value
+       - Attack > Defense: Victim dies
+       - Attack <= Defense: Victim survives
+    c. If Bodyguard protects:
+       - Victim survives
+       - Attacker dies
+       - Bodyguard dies (unless self-heal)
+    d. If Veteran on alert and killer visits:
+       - Killer dies (Veteran counterattack)
+       - Veteran may also take damage (if killer has powerful attack)
+    e. If kill succeeds:
+       - Create death via Death System
+       - Attach death note if provided
+
+15. Arsonist Action Resolution (Priority 6):
+    a. If douse:
+       - Mark target as doused
+       - Target doesn't know they're doused
+    b. If ignite:
+       - Find all doused players
+       - Kill all with powerful attack
+       - Clear douse marks
+
+16. Janitor/Forger Resolution (Priority 7):
+    a. Janitor cleans Mafia kill:
+       - If target died to Mafia, set cleaned=true
+       - Hide role and will from Town
+    b. Forger forges will:
+       - Set target's will to forged content
+       - Mark as forged
+
+17. Blackmail Resolution (Priority 8):
+    a. Blackmailer blackmails target
+    b. Apply blackmail restriction for next day
+    c. Blackmailer can see all whispers next day
+
+18. Post-Resolution:
+    a. Collect all deaths from this night
+    b. Generate death announcements for next day
+    c. Send notifications to players:
+       - Investigation results
+       - Protection notifications ("You were healed/protected")
+       - Attack notifications ("You were attacked but survived")
+       - Transport notifications ("You were transported")
+    d. Update game state
+
+19. Transition to Day:
+    a. Phase Management transitions to DAY_DISCUSSION
+    b. Display all death announcements
+    c. Begin day phase
+
+UI REQUIREMENTS:
+
+Night Action Selection (Human Player):
+  - Panel: "Select Your Target"
+  - Player list showing all living players (except self, usually)
+  - Click to select primary target
+  - For Transporter: Select two targets
+  - For Witch: Select controller and victim
+  - Death note button (for killers)
+  - Submit button: "Confirm Action"
+  - Cancel/Skip button: "Don't use ability tonight"
+
+Target Selection Validation:
+  - Valid targets highlighted (green border)
+  - Invalid targets grayed out (dead players, self if not allowed)
+  - Hover tooltip: "Cannot target {reason}"
+  - Selected target highlighted (yellow border)
+
+Ability Usage Tracking:
+  - Show remaining uses for limited abilities:
+    * Veteran: "Alerts remaining: X/3"
+    * Jailor: "Can execute: Yes/No"
+    * Vigilante: "Bullets remaining: X/3"
+  - Disable ability button if no uses remain
+
+Action Confirmation:
+  - After submitting: "Action confirmed. Targeting {TargetName}."
+  - Green checkmark icon
+  - Option to change action (before phase ends)
+
+Night Phase Progress:
+  - Show how many players submitted actions: "X/15 actions submitted"
+  - Don't reveal which specific players submitted (prevents metagaming)
+
+Morning Notifications:
+  - Personalized notifications based on action results:
+    * "Your target is a member of the Mafia!" (Sheriff)
+    * "You were protected by a Bodyguard!" (if attacked and saved)
+    * "You were roleblocked!" (if roleblocked)
+    * "You were transported!" (if transported)
+  - Pop-up or notification panel
+  - Click to dismiss
+
+AI BEHAVIOR:
+
+AI Action Selection:
+  - AI uses AI Decision Engine to choose target
+  - Factors:
+    * Role objectives (kill enemies, find evils, protect Town, etc.)
+    * Gathered information (investigation results, claims, voting patterns)
+    * Strategic value (kill confirmed Town power roles, protect important allies)
+    * Risk assessment (avoid targeting Veteran suspects)
+  - AI generates priority list of targets
+  - AI selects highest priority valid target
+
+AI Target Priority (Examples):
+  - Mafia Killer:
+    * Priority 1: Confirmed Sheriff/Investigator (eliminate threats)
+    * Priority 2: Vocal Town leaders (reduce coordination)
+    * Priority 3: Random Town (reduce numbers)
+    * Avoid: Suspected Veteran, Bodyguard claims
+  - Doctor:
+    * Priority 1: Jailor claim
+    * Priority 2: Revealed Mayor
+    * Priority 3: Investigator claim
+  - Serial Killer:
+    * Priority 1: Mafia members (eliminate competition)
+    * Priority 2: Town power roles (weaken Town)
+    * Priority 3: Random targets (chaos)
+
+AI Action Timing:
+  - Don't submit instantly (unrealistic)
+  - Random delay: 5-25 seconds into night phase
+  - Spread out submissions (not all at second 5)
+
+AI Limited Use Management:
+  - Veteran: Use alert strategically
+    * Night 1: 30% chance (surprise early killers)
+    * When suspected as target: 70% chance
+    * Save at least 1 alert for late game
+  - Vigilante: Don't waste bullets
+    * Only shoot confirmed/highly suspected evils
+    * Don't shoot randomly (risk hitting Town)
+
+AI Witch Strategy:
+  - Control suspected killers to target evils
+  - Control Town protective roles to waste their actions
+  - Create chaos and misdirection
+
+AI Transporter Strategy:
+  - Swap to protect important Town (confuse killers)
+  - Swap suspected evil with confirmed Town (investigations reveal truth)
+  - Avoid swapping randomly (can backfire)
+
+VALIDATION RULES:
+
+1. Action Permission:
+   - Player must have the role that can perform this action
+   - Player must be alive
+   - Player must not be in jail (if jailed, action auto-fails)
+   - Player must have uses remaining (for limited abilities)
+
+2. Target Validation:
+   - Target must be valid player ID (1-15)
+   - Target must be alive (usually, except Retributionist)
+   - Target must not be self (for most actions, except Vest)
+   - For two-target actions: Both targets must be valid and different
+
+3. Timing Validation:
+   - Action submitted during NIGHT phase
+   - Action submitted before phase timer expires
+
+4. Ability Cooldown:
+   - Some abilities have cooldowns (not in base game, but possible extension)
+   - Validate cooldown has expired
+
+5. Special Case Validation:
+   - Jailor can only execute if has execution power
+   - Arsonist must choose douse OR ignite (not both)
+   - Werewolf can only act on full moon nights
+
+EDGE CASES:
+
+1. Actor Dies Before Resolution:
+   - Player submits action, then dies same night (e.g., Jester haunt from previous day)
+   - Solution: Action fails (dead players can't act)
+
+2. Target Dies Before Resolution:
+   - Mafia targets Player A, but Player A dies to Serial Killer first (higher priority)
+   - Solution: Mafia's action fails (target already dead)
+
+3. Multiple Protections:
+   - Doctor and Bodyguard both protect same target
+   - Solution: Both protections apply
+   - If target attacked: Both count, but Bodyguard's counterattack takes precedence
+
+4. Witch Controls Witch:
+   - Witch A controls Witch B
+   - Solution: Witch B's control action is redirected (targets changed)
+   - Can create complex redirect chains (resolve in order)
+
+5. Transporter Swaps Self:
+   - Transporter swaps themselves with Player B
+   - Solution: Valid action, Transporter and B are swapped
+
+6. Veteran Kills Doctor Protecting Them:
+   - Veteran on alert, Doctor tries to heal Veteran
+   - Solution: Doctor dies (visited Veteran on alert)
+   - Veteran loses heal (Doctor died before healing)
+
+7. Serial Killer Kills Roleblocking Escort:
+   - Escort roleblocks Serial Killer
+   - Solution:
+     * Serial Killer is roleblock-immune
+     * Serial Killer kills Escort
+     * Serial Killer's original action DOES execute (not blocked)
+
+8. Jailor Jails Serial Killer:
+   - Jailor jails Serial Killer, who wanted to kill someone
+   - Solution: Serial Killer is roleblocked (action fails)
+   - Serial Killer does NOT kill Jailor (jail is different from roleblock)
+
+9. All Mafia Roleblocked:
+   - Witch controls Escort to roleblock Godfather, Consort roleblocks Mafioso
+   - Solution: No Mafia kill this night
+
+10. Arsonist Ignites Self (if doused):
+    - Arsonist doused by another Arsonist (if 2 in game), then ignites
+    - Solution: Arsonist can kill themselves (valid but rare)
+
+11. Lookout Watches Transporter Swap Target:
+    - Lookout watches Player A, Transporter swaps A and B
+    - Solution: Lookout actually watches B (swap redirects)
+    - Lookout sees visitors to B
+
+12. AI Action Timeout:
+    - AI doesn't submit action before phase ends (LLM too slow)
+    - Solution: AI's action defaults to "no action"
+    - Log warning (AI needs optimization)
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
+from enum import Enum, IntEnum
+
+class ActionType(str, Enum):
+    KILL = "kill"
+    PROTECT = "protect"
+    INVESTIGATE = "investigate"
+    WATCH = "watch"
+    JAIL = "jail"
+    EXECUTE = "execute"
+    ROLEBLOCK = "roleblock"
+    TRANSPORT = "transport"
+    ALERT = "alert"
+    CONTROL = "control"
+    DOUSE = "douse"
+    IGNITE = "ignite"
+    VEST = "vest"
+    CLEAN = "clean"
+    FORGE = "forge"
+    BLACKMAIL = "blackmail"
+
+class ActionPriority(IntEnum):
+    DEFENSIVE_SETUP = 0    # Veteran, Bodyguard
+    REDIRECTS = 1          # Witch, Transporter
+    ROLEBLOCK = 2          # Escort, Consort
+    PROTECTIVE = 3         # Doctor, Jail
+    INVESTIGATIVE = 4      # Sheriff, Investigator, Lookout
+    KILLS = 5              # Mafia, SK, Vigilante
+    ARSONIST = 6           # Douse, Ignite
+    MANIPULATION = 7       # Janitor, Forger
+    BLACKMAIL = 8          # Blackmailer
+
+class ActionResult(BaseModel):
+    success: bool
+    message: str
+    discovered_info: Dict = {}
+    caused_death: bool = False
+    was_blocked: bool = False
+    special_events: List[str] = []
+
+class NightAction(BaseModel):
+    action_id: int
+    actor_id: int
+    actor_role: str
+    target_id: Optional[int] = None
+    secondary_target_id: Optional[int] = None
+    action_type: ActionType
+    priority: int
+    night_number: int
+    submitted: bool = False
+    result: Optional[ActionResult] = None
+    was_roleblocked: bool = False
+    was_controlled: bool = False
+    controller_id: Optional[int] = None
+    death_note: Optional[str] = None
+
+class NightActionQueue(BaseModel):
+    actions: List[NightAction] = []
+    all_submitted: bool = False
+
+class NightActionSystem:
+    def __init__(self):
+        self.queue = NightActionQueue()
+        self.action_counter = 0
+
+    def submit_action(self, actor_id: int, action_type: ActionType,
+                     target_id: Optional[int], game_state) -> bool:
+        """Submit a night action"""
+        actor = game_state.get_player(actor_id)
+
+        # Validate
+        if not actor.is_alive:
+            return False
+
+        # Create action
+        priority = self._get_priority_for_action(action_type)
+        action = NightAction(
+            action_id=self.action_counter,
+            actor_id=actor_id,
+            actor_role=actor.role,
+            target_id=target_id,
+            action_type=action_type,
+            priority=priority,
+            night_number=game_state.night_number,
+            submitted=True
+        )
+
+        self.queue.actions.append(action)
+        self.action_counter += 1
+
+        # Check if all submitted
+        self._check_all_submitted(game_state)
+        return True
+
+    def resolve_all_actions(self, game_state):
+        """Resolve all night actions in priority order"""
+        # Sort by priority
+        sorted_actions = sorted(self.queue.actions, key=lambda a: a.priority)
+
+        # Resolve each action
+        for action in sorted_actions:
+            if not game_state.get_player(action.actor_id).is_alive:
+                continue  # Skip if actor died
+
+            if action.was_roleblocked and not self._is_roleblock_immune(action.actor_role):
+                action.result = ActionResult(
+                    success=False,
+                    message="You were roleblocked!",
+                    was_blocked=True
+                )
+                continue
+
+            # Execute action based on type
+            result = self._execute_action(action, game_state)
+            action.result = result
+
+        # Clear queue for next night
+        self.queue = NightActionQueue()
+
+    def _execute_action(self, action: NightAction, game_state) -> ActionResult:
+        """Execute specific action logic"""
+        if action.action_type == ActionType.KILL:
+            return self._resolve_kill(action, game_state)
+        elif action.action_type == ActionType.INVESTIGATE:
+            return self._resolve_investigation(action, game_state)
+        elif action.action_type == ActionType.PROTECT:
+            return self._resolve_protection(action, game_state)
+        # ... other action types
+        else:
+            return ActionResult(success=False, message="Unknown action type")
+
+    def _resolve_kill(self, action: NightAction, game_state) -> ActionResult:
+        """Resolve a kill action"""
+        target = game_state.get_player(action.target_id)
+        attack_value = self._get_attack_value(action.actor_role)
+        defense_value = self._get_defense_value(target.role)
+
+        if attack_value > defense_value:
+            # Kill succeeds
+            game_state.death_system.process_death(
+                target.player_id,
+                self._get_death_cause(action.actor_role),
+                game_state,
+                killed_by=action.actor_id
+            )
+            return ActionResult(
+                success=True,
+                message=f"You have killed {target.name}!",
+                caused_death=True
+            )
+        else:
+            # Target survived
+            return ActionResult(
+                success=False,
+                message="Your target's defense was too strong!"
+            )
+
+    def _get_priority_for_action(self, action_type: ActionType) -> int:
+        """Map action type to priority"""
+        priority_map = {
+            ActionType.ALERT: ActionPriority.DEFENSIVE_SETUP,
+            ActionType.CONTROL: ActionPriority.REDIRECTS,
+            ActionType.TRANSPORT: ActionPriority.REDIRECTS,
+            ActionType.ROLEBLOCK: ActionPriority.ROLEBLOCK,
+            ActionType.JAIL: ActionPriority.PROTECTIVE,
+            ActionType.PROTECT: ActionPriority.PROTECTIVE,
+            ActionType.INVESTIGATE: ActionPriority.INVESTIGATIVE,
+            ActionType.WATCH: ActionPriority.INVESTIGATIVE,
+            ActionType.KILL: ActionPriority.KILLS,
+            ActionType.IGNITE: ActionPriority.ARSONIST,
+            ActionType.CLEAN: ActionPriority.MANIPULATION,
+            ActionType.FORGE: ActionPriority.MANIPULATION,
+            ActionType.BLACKMAIL: ActionPriority.BLACKMAIL,
+        }
+        return priority_map.get(action_type, 5)
+```
+
+Performance Optimization:
+  - Action resolution should complete in <500ms for 15 players
+  - Use efficient sorting (O(n log n))
+  - Cache role abilities and immunities
+  - Parallelize independent action checks (where possible)
+  - Profile and optimize hotspots
+
+LLM Context for AI Actions:
+  - Keep action decision context minimal (reduce token usage)
+  - Provide:
+    * Current role and ability
+    * List of living players with known info
+    * Recent events (deaths, claims)
+  - Request: "Select your target for tonight"
+  - Response: Target player ID
+  - Timeout: 20 seconds (allow time for decision)

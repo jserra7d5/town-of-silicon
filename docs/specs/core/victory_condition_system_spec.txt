@@ -1,0 +1,571 @@
+FILENAME: victory_condition_system_spec.txt
+
+SYSTEM: Victory Condition System
+
+DEPENDENCIES:
+- Role Assignment System (needs role and faction information)
+- Death System (tracks living/dead players)
+- Phase Management System (triggers victory checks at appropriate times)
+
+DATA STRUCTURES:
+
+VictoryCondition:
+  - faction: string (e.g., "Town", "Mafia", "Neutral Killing")
+  - role: string | null (specific role win, e.g., "Jester", or null for faction win)
+  - condition_type: ConditionType
+  - check_function: Callable[[GameState], bool]
+  - priority: int (for handling multiple simultaneous wins)
+
+ConditionType (enum):
+  - ELIMINATE_ENEMIES: "eliminate_enemies" (e.g., Town wins by eliminating all Mafia/NK)
+  - ACHIEVE_MAJORITY: "achieve_majority" (e.g., Mafia wins with majority)
+  - SURVIVE_TO_END: "survive_to_end" (e.g., Survivor wins if alive at game end)
+  - SPECIFIC_EVENT: "specific_event" (e.g., Jester wins when lynched)
+  - TARGET_ELIMINATED: "target_eliminated" (e.g., Executioner wins when target lynched)
+  - EVERYONE_DEAD: "everyone_dead" (e.g., Arsonist wins when all ignited)
+
+GameResult:
+  - is_game_over: bool
+  - winners: List[WinnerInfo]
+  - victory_type: string (description of how game was won)
+  - game_end_time: datetime
+  - game_duration: float (seconds)
+
+WinnerInfo:
+  - player_id: int
+  - player_name: string
+  - role: string
+  - faction: string
+  - is_alive: bool (some roles can win while dead)
+  - win_reason: string
+
+FactionStatus:
+  - faction_name: string
+  - living_members: List[int] (player IDs)
+  - dead_members: List[int]
+  - has_killing_power: bool (can this faction kill at night?)
+
+VictoryCheckContext:
+  - living_players: List[PlayerInfo]
+  - dead_players: List[PlayerInfo]
+  - faction_status: Dict[string, FactionStatus]
+  - current_phase: PhaseType
+  - recent_events: List[GameEvent] (for event-based victories)
+
+VICTORY CONDITIONS BY FACTION:
+
+TOWN VICTORY:
+  Condition: All members of the Mafia and Coven are dead, and at least one Town member is alive.
+  AND: All Neutral Killing roles are dead.
+
+  Check Logic:
+    living_mafia = count living players where faction == "Mafia"
+    living_nk = count living players where role in [Serial Killer, Arsonist, Werewolf]
+    living_town = count living players where faction == "Town"
+
+    return living_mafia == 0 AND living_nk == 0 AND living_town > 0
+
+  Special Cases:
+    - Witch alive does not prevent Town victory (Witch is Neutral Evil)
+    - Executioner/Jester alive does not prevent Town victory
+    - Survivor alive does not prevent Town victory
+
+MAFIA VICTORY:
+  Condition: Mafia members equal or outnumber all other living players, and Mafia has killing power.
+  OR: Mafia is the only faction with killing power remaining.
+
+  Check Logic:
+    living_mafia = count living players where faction == "Mafia"
+    living_non_mafia = count living players where faction != "Mafia"
+    mafia_has_kill = any Mafia member can kill (GF, Mafioso, Ambusher)
+
+    # Majority rule
+    if living_mafia >= living_non_mafia AND mafia_has_kill:
+      return True
+
+    # Only killers remaining
+    living_nk = count living players where role in [SK, Arsonist, Werewolf]
+    if living_nk == 0 AND living_town == 0:
+      return True
+
+  Special Cases:
+    - If Mafia has majority but no killing power (all killers dead), game continues
+    - Neutral Killing roles can prevent Mafia victory even if outnumbered
+
+SERIAL KILLER VICTORY:
+  Condition: Serial Killer is the last player alive.
+  OR: Only Serial Killer and Survivors remain.
+
+  Check Logic:
+    sk_alive = any living player has role == "Serial Killer"
+    other_non_survivor = count living players where role not in ["Serial Killer", "Survivor"]
+
+    return sk_alive AND other_non_survivor == 0
+
+ARSONIST VICTORY:
+  Condition: Arsonist is the last player alive.
+  OR: Only Arsonist and Survivors remain.
+
+  Check Logic:
+    arso_alive = any living player has role == "Arsonist"
+    other_non_survivor = count living players where role not in ["Arsonist", "Survivor"]
+
+    return arso_alive AND other_non_survivor == 0
+
+WEREWOLF VICTORY:
+  Condition: Werewolf is the last player alive.
+  OR: Only Werewolf and Survivors remain.
+
+  Check Logic:
+    ww_alive = any living player has role == "Werewolf"
+    other_non_survivor = count living players where role not in ["Werewolf", "Survivor"]
+
+    return ww_alive AND other_non_survivor == 0
+
+JESTER VICTORY:
+  Condition: Jester is lynched by the Town.
+
+  Check Logic:
+    # Triggered immediately when Jester is lynched
+    if recent_lynch.player_role == "Jester" AND recent_lynch.method == "trial":
+      return True
+
+  Special Cases:
+    - Jester must be lynched (voted guilty in trial), not killed at night
+    - Game continues after Jester wins (Jester haunts one guilty voter)
+
+EXECUTIONER VICTORY:
+  Condition: Executioner's target is lynched.
+
+  Check Logic:
+    executioner = get player with role "Executioner"
+    if not executioner: return False
+
+    target = executioner.target
+    if recent_lynch.player_id == target AND recent_lynch.method == "trial":
+      return True
+
+  Special Cases:
+    - Target must be lynched, not killed at night
+    - If target dies at night, Executioner becomes Jester
+    - Game continues after Executioner wins
+
+WITCH VICTORY:
+  Condition: Witch survives to see Town lose.
+
+  Check Logic:
+    witch_alive = any living player has role == "Witch"
+    town_lost = not check_town_victory()
+
+    # Witch wins with any faction that defeats Town
+    if witch_alive AND (mafia_won OR nk_won):
+      return True
+
+SURVIVOR VICTORY:
+  Condition: Survivor is alive when any other faction achieves victory.
+
+  Check Logic:
+    survivor_alive = any living player has role == "Survivor"
+    any_faction_won = check_any_victory_condition()
+
+    return survivor_alive AND any_faction_won
+
+  Special Cases:
+    - Survivor wins with any winning team
+    - Multiple Survivors can all win together
+
+GUARDIAN ANGEL VICTORY:
+  Condition: Guardian Angel's target survives to see their faction win.
+  OR: Guardian Angel survives to see any faction win (if target died).
+
+  Check Logic:
+    ga = get player with role "Guardian Angel"
+    if not ga: return False
+
+    target = ga.target
+    any_faction_won = check_any_victory_condition()
+
+    if target.is_alive AND target.faction_won AND any_faction_won:
+      return True
+    if ga.is_alive AND any_faction_won:
+      return True
+
+AMNESIAC VICTORY:
+  Condition: Amnesiac remembers a role and wins with that role's faction.
+
+  Check Logic:
+    # Amnesiac's victory condition changes when they remember
+    amnesiac = get player with role "Amnesiac"
+    if amnesiac.remembered_role:
+      # Check victory for the remembered role's faction
+      return check_victory_for_faction(amnesiac.remembered_role.faction)
+
+LOGIC FLOW:
+
+1. Victory Check Triggers:
+   Victory conditions checked at these times:
+   a. End of Night phase (after night actions resolved)
+   b. After Judgment Results (after player lynched)
+   c. After any player death
+   d. Start of each new phase (safety check)
+
+2. Victory Check Sequence:
+   def check_victory_conditions(game_state: GameState) -> GameResult:
+     # Priority order matters for simultaneous wins
+
+     # 1. Check for draw (everyone dead)
+     if all_players_dead():
+       return GameResult(is_game_over=True, winners=[], victory_type="Draw - Everyone died")
+
+     # 2. Check event-based victories (highest priority)
+     if jester_lynched():
+       winners = [get_player_by_role("Jester")]
+       # Game continues! Jester haunts someone
+       return GameResult(is_game_over=False, winners=winners, victory_type="Jester lynched")
+
+     if executioner_target_lynched():
+       winners = [get_player_by_role("Executioner")]
+       # Game continues!
+       return GameResult(is_game_over=False, winners=winners, victory_type="Executioner target lynched")
+
+     # 3. Check faction victories (game-ending)
+     town_wins = check_town_victory()
+     mafia_wins = check_mafia_victory()
+     sk_wins = check_serial_killer_victory()
+     arso_wins = check_arsonist_victory()
+     ww_wins = check_werewolf_victory()
+
+     # 4. Handle simultaneous wins
+     if town_wins:
+       winners = get_all_town_players() + get_survivors() + get_guardian_angels_with_town_target()
+       return GameResult(is_game_over=True, winners=winners, victory_type="Town Victory")
+
+     if mafia_wins:
+       winners = get_all_mafia_players() + get_witch() + get_survivors()
+       return GameResult(is_game_over=True, winners=winners, victory_type="Mafia Victory")
+
+     if sk_wins:
+       winners = [get_serial_killer()] + get_survivors()
+       return GameResult(is_game_over=True, winners=winners, victory_type="Serial Killer Victory")
+
+     if arso_wins:
+       winners = [get_arsonist()] + get_survivors()
+       return GameResult(is_game_over=True, winners=winners, victory_type="Arsonist Victory")
+
+     if ww_wins:
+       winners = [get_werewolf()] + get_survivors()
+       return GameResult(is_game_over=True, winners=winners, victory_type="Werewolf Victory")
+
+     # No victory yet
+     return GameResult(is_game_over=False, winners=[], victory_type="")
+
+3. Faction Status Calculation:
+   Before checking victory, compute faction status:
+
+   def calculate_faction_status(game_state: GameState) -> Dict[str, FactionStatus]:
+     factions = {}
+
+     for faction_name in ["Town", "Mafia", "Neutral"]:
+       living = [p for p in game_state.players if p.is_alive and p.faction == faction_name]
+       dead = [p for p in game_state.players if not p.is_alive and p.faction == faction_name]
+
+       has_killing = False
+       if faction_name == "Mafia":
+         has_killing = any(p.role in ["Godfather", "Mafioso", "Ambusher"] for p in living)
+       elif faction_name == "Town":
+         has_killing = any(p.role in ["Jailor", "Vigilante", "Veteran"] for p in living)
+
+       factions[faction_name] = FactionStatus(
+         faction_name=faction_name,
+         living_members=[p.player_id for p in living],
+         dead_members=[p.player_id for p in dead],
+         has_killing_power=has_killing
+       )
+
+     return factions
+
+4. Winner Determination:
+   When a faction wins, determine all winners:
+
+   def determine_winners(victory_type: string, game_state: GameState) -> List[WinnerInfo]:
+     winners = []
+
+     if "Town" in victory_type:
+       # All Town members (alive or dead)
+       for player in game_state.players:
+         if player.faction == "Town":
+           winners.append(WinnerInfo(
+             player_id=player.player_id,
+             player_name=player.name,
+             role=player.role,
+             faction="Town",
+             is_alive=player.is_alive,
+             win_reason="Town Victory"
+           ))
+
+       # Survivors
+       for player in game_state.players:
+         if player.role == "Survivor" and player.is_alive:
+           winners.append(WinnerInfo(..., win_reason="Survived with Town"))
+
+       # Guardian Angels with Town targets
+       for player in game_state.players:
+         if player.role == "Guardian Angel":
+           target = get_player(player.target_id)
+           if target.faction == "Town" and (target.is_alive or player.is_alive):
+             winners.append(WinnerInfo(..., win_reason="Protected Town member"))
+
+     # Similar logic for Mafia, NK victories...
+
+     return winners
+
+5. Game End Sequence:
+   When is_game_over=True:
+   a. Set game_state.game_over = True
+   b. Set game_state.game_result = GameResult
+   c. Transition phase to POSTGAME
+   d. Disable all game actions
+   e. Display victory screen
+
+UI REQUIREMENTS:
+
+Victory Screen:
+  - Large banner: "{FACTION} WINS!"
+  - Color coded by winning faction:
+    * Town: Green
+    * Mafia: Red
+    * Serial Killer: Purple
+    * Arsonist: Orange
+    * Werewolf: Gray
+    * Draw: White
+  - Animated confetti/effect for winners
+  - List of all winners with:
+    * Player name
+    * Role name
+    * Alive/Dead status
+    * Skull icon if dead
+  - Victory message explaining how game was won
+
+Game Summary:
+  - Final player list showing all roles
+  - Statistics:
+    * Game duration
+    * Total days/nights
+    * Number of lynches
+    * Number of night kills
+  - MVP player (most impactful actions)
+  - "Play Again" button
+  - "Main Menu" button
+
+Mid-Game Victory Notifications:
+  - Jester Victory: "Jester has won! The game continues..."
+  - Executioner Victory: "Executioner has won! The game continues..."
+  - Brief animation and sound effect
+  - Update player list to show winner highlight
+
+Victory Progress Indicators (during game):
+  - Living player count by faction:
+    * Town: X alive
+    * Mafia: Y alive
+    * Neutral: Z alive
+  - Visual progress bars showing faction strength
+  - Warning when faction close to victory:
+    * "Mafia has majority!" (red alert)
+    * "Only 2 Town remain!" (yellow warning)
+
+AI BEHAVIOR:
+
+AI Victory Awareness:
+  - Each AI knows their victory condition
+  - AI makes decisions to pursue their win condition
+  - Examples:
+    * Mafia coordinates to achieve majority
+    * Serial Killer tries to eliminate all others
+    * Executioner pushes to lynch their target
+    * Survivor tries to stay alive and blend in
+
+AI End-Game Behavior:
+  - As victory approaches, AI behavior changes:
+    * Mafia becomes more aggressive when close to majority
+    * Town becomes desperate to find and lynch evils
+    * NK roles may become more reckless to secure kills
+  - AI calculates "turns to victory":
+    if mafia_count >= non_mafia_count - 1:
+      strategy = "aggressive" # One more night to win
+
+AI Deception:
+  - Mafia/NK may false-claim roles to avoid lynch
+  - Executioner may provide false information to incriminate target
+  - Jester may act suspicious to get lynched
+
+VALIDATION RULES:
+
+1. Victory Condition Consistency:
+   - Only one faction can achieve game-ending victory
+   - Multiple Neutral roles can win simultaneously (e.g., 2 Survivors)
+   - Event victories (Jester, Executioner) don't end the game
+
+2. Winner List Validation:
+   - All winners must have compatible victory conditions
+   - Survivor can be in winner list with any faction
+   - Witch cannot win with Town
+   - Town and Mafia cannot both win
+
+3. Victory Timing Validation:
+   - Victory checked after all phase actions complete
+   - Don't check during action resolution (prevents mid-action wins)
+   - Check immediately after any death event
+
+4. Faction Count Validation:
+   - Living count must match actual living players
+   - Dead count must include only confirmed dead (not disconnected)
+
+5. Special Role Validation:
+   - Executioner target must be Town member (not Jailor/Mayor)
+   - Guardian Angel target must exist
+   - Amnesiac can only remember dead player's role
+
+EDGE CASES:
+
+1. Simultaneous Elimination:
+   - Last Town and last Mafia kill each other same night
+   - Solution: Check both Town and Mafia victory conditions
+   - If both fail, check NK/Survivor victory
+   - If no one left: Draw
+
+2. Jester Lynched on Final Day:
+   - Jester lynched when only Jester and 1 other remain
+   - Solution: Jester wins, game continues
+   - Jester haunts the other player → everyone dead → Draw
+
+3. Survivor as Kingmaker:
+   - Only Survivor, 1 Town, 1 Mafia remain
+   - Solution: Game continues until Survivor dies or one faction eliminated
+   - Survivor's vote decides lynches
+
+4. Multiple Neutral Killers:
+   - Serial Killer and Arsonist both alive, all others dead
+   - Solution: Both continue trying to kill each other
+   - First to kill the other wins
+
+5. Witch + Neutral Killer:
+   - Only Witch and Serial Killer remain
+   - Solution: Witch can control SK to kill themselves?
+   - Or SK kills Witch → SK wins
+
+6. All Killing Roles Dead:
+   - No one left with killing power (e.g., only Survivor, Medium, Amnesiac)
+   - Solution: Stalemate detection
+   - After 3 days with no kills, declare Draw
+
+7. Executioner/Jester Win During Final Night:
+   - Executioner's target lynched when only 3 remain
+   - That night, last 2 players kill each other
+   - Solution: Executioner wins (event victory), but game also ends (Draw)
+   - Both are recorded in game results
+
+8. Guardian Angel Target Dies Early:
+   - GA's target dies Night 1
+   - Solution: GA now just needs to survive to any faction win
+   - GA essentially becomes Survivor
+
+9. Amnesiac Never Remembers:
+   - Amnesiac alive at game end, never chose a role
+   - Solution: Amnesiac loses
+   - They don't appear in winner list
+
+10. Lynched Player was Last Town:
+    - Town lynches the last Town member (oops)
+    - Solution: Check victory after lynch
+    - Mafia wins immediately
+
+IMPLEMENTATION NOTES:
+
+Python/Pydantic Structure:
+```python
+from pydantic import BaseModel
+from typing import List, Dict, Callable, Optional
+from enum import Enum
+from datetime import datetime
+
+class ConditionType(str, Enum):
+    ELIMINATE_ENEMIES = "eliminate_enemies"
+    ACHIEVE_MAJORITY = "achieve_majority"
+    SURVIVE_TO_END = "survive_to_end"
+    SPECIFIC_EVENT = "specific_event"
+
+class WinnerInfo(BaseModel):
+    player_id: int
+    player_name: str
+    role: str
+    faction: str
+    is_alive: bool
+    win_reason: str
+
+class GameResult(BaseModel):
+    is_game_over: bool
+    winners: List[WinnerInfo]
+    victory_type: str
+    game_end_time: Optional[datetime] = None
+    game_duration: Optional[float] = None
+
+class FactionStatus(BaseModel):
+    faction_name: str
+    living_members: List[int]
+    dead_members: List[int]
+    has_killing_power: bool
+
+class VictoryChecker:
+    def __init__(self, game_state):
+        self.game_state = game_state
+
+    def check_all_conditions(self) -> GameResult:
+        # Priority order
+        if self._check_draw():
+            return self._create_draw_result()
+
+        # Event-based (non-ending)
+        jester_result = self._check_jester_victory()
+        if jester_result.winners:
+            return jester_result
+
+        executioner_result = self._check_executioner_victory()
+        if executioner_result.winners:
+            return executioner_result
+
+        # Faction victories (game-ending)
+        if self._check_town_victory():
+            return self._create_town_victory()
+
+        if self._check_mafia_victory():
+            return self._create_mafia_victory()
+
+        if self._check_serial_killer_victory():
+            return self._create_sk_victory()
+
+        # ... other conditions
+
+        return GameResult(is_game_over=False, winners=[], victory_type="")
+
+    def _check_town_victory(self) -> bool:
+        living = self.game_state.get_living_players()
+        living_mafia = [p for p in living if p.faction == "Mafia"]
+        living_nk = [p for p in living if p.role in ["Serial Killer", "Arsonist", "Werewolf"]]
+        living_town = [p for p in living if p.faction == "Town"]
+
+        return len(living_mafia) == 0 and len(living_nk) == 0 and len(living_town) > 0
+
+    # ... other check methods
+```
+
+Performance Considerations:
+  - Victory checks should complete in <10ms
+  - Cache faction status between checks
+  - Use indexed lookups for player queries
+  - Avoid redundant calculations
+
+Stalemate Detection:
+  - Track days_without_death counter
+  - If counter > 3 and no killing roles remain:
+    * Declare Draw
+    * Prevents infinite game loops

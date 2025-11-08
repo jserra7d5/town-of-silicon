@@ -1,0 +1,440 @@
+FILENAME: voting_system_spec.txt
+
+SYSTEM: Voting System
+
+DEPENDENCIES:
+- Phase Management System (voting occurs during specific phases)
+- Player List Display (shows vote buttons and counts)
+- Death System (lynching causes death)
+- Last Will System (displays will after guilty verdict)
+
+DATA STRUCTURES:
+
+VoteTracker:
+  - accused_player_id: int | null
+  - accusers: List[int] (player IDs who voted to accuse)
+  - required_votes: int (majority, usually 50% + 1)
+  - current_votes: int
+  - vote_phase: VotePhase
+
+VotePhase (enum):
+  - NO_VOTE: "no_vote" (no accusation active)
+  - ACCUSATION: "accusation" (voting someone to trial)
+  - DEFENSE: "defense" (accused speaks)
+  - JUDGMENT: "judgment" (guilty/innocent voting)
+  - RESULTS: "results" (displaying verdict)
+
+AccusationVote:
+  - voter_id: int
+  - accused_id: int
+  - timestamp: datetime
+
+JudgmentVote:
+  - voter_id: int
+  - vote: VoteType
+  - timestamp: datetime
+
+VoteType (enum):
+  - GUILTY: "guilty"
+  - INNOCENT: "innocent"
+  - ABSTAIN: "abstain"
+
+VoteResult:
+  - accused_id: int
+  - guilty_count: int
+  - innocent_count: int
+  - abstain_count: int
+  - verdict: "guilty" | "innocent"
+
+MayorVoteModifier:
+  - player_id: int
+  - is_revealed: bool
+  - vote_weight: int (3 if revealed, 1 otherwise)
+
+VOTING MECHANICS:
+
+Accusation Phase:
+  - During DAY_DISCUSSION, players can vote to put someone on trial
+  - Click player name → "Vote" button
+  - Required: Majority of living players (50% + 1)
+  - Once majority reached, transition to DEFENSE phase
+  - Can cancel vote ("Unvote") before majority reached
+
+Defense Phase:
+  - Accused player has 20 seconds to defend themselves
+  - Only accused can speak (all others muted)
+  - Cannot be skipped (full 20 seconds)
+  - Transitions to JUDGMENT after timer
+
+Judgment Phase:
+  - All living players except accused vote guilty/innocent/abstain
+  - 20 seconds to vote
+  - Can change vote before time expires
+  - Guilty: Vote to execute (lynch) accused
+  - Innocent: Vote to pardon accused
+  - Abstain: Neutral, don't vote either way
+
+Results Phase:
+  - Count votes: Guilty vs. Innocent
+  - Abstain votes don't count for either side
+  - If Guilty > Innocent: Accused is lynched (dies)
+  - If Innocent >= Guilty: Accused is pardoned (survives)
+  - Tie goes to Innocent
+
+Mayor Vote Weight:
+  - Revealed Mayor's vote counts as 3 votes
+  - Applies to both accusation and judgment
+  - Shows as "3" next to Mayor's name in vote tally
+
+Vote Limits:
+  - Each player can only be voted to trial once per day
+  - If pardoned, cannot be voted up again same day
+  - Can vote different players to trial sequentially
+
+LOGIC FLOW:
+
+1. Accusation Voting:
+   a. Player A clicks "Vote" on Player B
+   b. Create AccusationVote
+   c. Add Player A to VoteTracker.accusers
+   d. Increment current_votes
+   e. If Mayor revealed and voting: current_votes += 2 (total 3)
+   f. Broadcast to all: "{Player A} has voted against {Player B}. ({current}/{required})"
+   g. Update UI vote counter
+   h. If current_votes >= required_votes:
+      - Lock in accusation
+      - Transition to DEFENSE phase
+      - Show: "{Player B} is on trial for conspiracy against the Town!"
+
+2. Unvoting (Canceling Accusation Vote):
+   a. Player clicks "Unvote" on accused
+   b. Remove AccusationVote
+   c. Remove player from accusers list
+   d. Decrement current_votes
+   e. Broadcast: "{Player} has rescinded their vote."
+   f. If current_votes < required_votes (dropped below majority):
+      - Trial is cancelled (if not yet started)
+
+3. Defense Phase:
+   a. Mute all players except accused
+   b. Start 20-second timer
+   c. Accused can type in day chat
+   d. Display: "{Accused}'s Defense"
+   e. Timer expires → transition to JUDGMENT
+
+4. Judgment Voting:
+   a. All living players (except accused) see voting UI
+   b. Three buttons: "Guilty" | "Innocent" | "Abstain"
+   c. Player clicks one
+   d. Create JudgmentVote with player's choice
+   e. Can change vote (replaces previous vote)
+   f. Votes are hidden until RESULTS phase
+   g. 20-second timer
+   h. If all players voted early: Option to advance early (or wait for timer)
+
+5. Results Calculation:
+   a. Count all JudgmentVotes:
+      - guilty_count = count of GUILTY votes
+      - innocent_count = count of INNOCENT votes
+      - abstain_count = count of ABSTAIN votes
+   b. Apply Mayor modifier:
+      - If Mayor voted GUILTY: guilty_count += 2
+      - If Mayor voted INNOCENT: innocent_count += 2
+   c. Determine verdict:
+      - If guilty_count > innocent_count: verdict = "guilty"
+      - Else: verdict = "innocent"
+
+6. Results Display:
+   a. Show vote tally:
+      - "Guilty: {guilty_count}"
+      - "Innocent: {innocent_count}"
+      - "Abstained: {abstain_count}"
+   b. Announce verdict:
+      - If guilty: "{Accused} will be lynched."
+      - If innocent: "{Accused} has been pardoned."
+   c. Display vote breakdown (who voted what):
+      - Optional: Show each player's vote publicly
+      - Or: Only show totals
+
+7. Guilty Verdict Execution:
+   a. Transition to LAST_WORDS phase
+   b. Mute all except condemned
+   c. 10-second timer for last words
+   d. Timer expires:
+      - Process death (lynched)
+      - Reveal role
+      - Display will
+      - Remove from player list
+   e. Transition to NIGHT phase
+
+8. Innocent Verdict:
+   a. Accused is pardoned
+   b. Mark accused as "voted today" (cannot be voted again same day)
+   c. Return to DAY_DISCUSSION
+   d. Can vote someone else to trial
+
+9. AI Voting Behavior:
+   a. AI decides whether to vote based on:
+      - Suspicion level (from investigations, behavior analysis)
+      - Role (Town votes up evils, Mafia votes up Town, etc.)
+      - Social pressure (bandwagoning)
+   b. AI generates vote with delay (1-5 seconds)
+   c. AI may unvote if new information emerges
+
+10. AI Judgment Voting:
+    a. AI analyzes accused's defense speech
+    b. AI considers:
+       - Prior suspicion level
+       - Defense quality/believability
+       - Claimed role
+       - Faction alignment (Mafia votes innocent on Mafia members)
+    c. AI votes:
+       - Guilty: If confident accused is evil
+       - Innocent: If accused seems Town or defense convincing
+       - Abstain: If uncertain
+
+UI REQUIREMENTS:
+
+Vote Buttons (Player List):
+  - Each living player has "Vote" button next to name
+  - Disabled for self (cannot vote yourself)
+  - Disabled for already-voted players same day
+  - Click to vote (accusation)
+  - Changes to "Unvote" after voting
+
+Vote Counter:
+  - Display: "{Current}/{Required} votes"
+  - Updates in real-time
+  - Color codes:
+    * White: < 50% of required
+    * Yellow: 50-90% of required
+    * Red: 90-99% of required
+    * Green: Majority reached (100%)
+
+Trial Banner:
+  - Large banner when trial starts
+  - "{Accused Player} is on trial for conspiracy against the Town!"
+  - Red background
+  - Accused player highlighted in player list
+
+Defense Phase UI:
+  - Timer: "Defense: 20s"
+  - Only accused can type
+  - All others see "Listening to defense..."
+
+Judgment Voting UI:
+  - Three large buttons:
+    * "GUILTY" (red)
+    * "INNOCENT" (green)
+    * "ABSTAIN" (gray)
+  - Selected vote highlighted
+  - Timer: "Judgment: 20s"
+  - Vote counter: "X/15 voted"
+
+Vote Results Display:
+  - Tally:
+    * Guilty: X (red)
+    * Innocent: Y (green)
+    * Abstained: Z (gray)
+  - Verdict announcement (large text):
+    * "GUILTY" (red) or "INNOCENT" (green)
+  - Vote breakdown table (optional):
+    | Player | Vote |
+    | John   | Guilty |
+    | Sarah  | Innocent |
+    | ...    | ... |
+
+Mayor Revealed Indicator:
+  - Crown icon next to Mayor
+  - Vote counts as "3" in tally
+  - Highlighted in gold
+
+AI BEHAVIOR:
+
+AI Accusation Strategy:
+  - Town: Vote up suspected evils
+    * Use investigation results
+    * Vote claims that don't make sense
+    * Follow confirmed Town leaders
+  - Mafia: Vote up Town members
+    * Blend in by voting some evils (bussing)
+    * Push votes on vocal Town players
+  - Executioner: Push vote on target
+    * Build case against target
+    * Coordinate with others
+
+AI Judgment Strategy:
+  - Town: Vote guilty on confirmed evils, innocent on Town
+  - Mafia: Vote innocent on Mafia, guilty on Town
+  - Neutral: Varies (Jester wants to be lynched, Executioner wants target lynched)
+
+AI Voting Timing:
+  - Don't vote instantly (spread out 5-25 seconds)
+  - React to others' votes (bandwagon or counter-wagon)
+  - Change vote if new info emerges
+
+VALIDATION RULES:
+
+1. Accusation Vote Validation:
+   - Voter must be alive
+   - Accused must be alive
+   - Accused must not have been on trial today
+   - Current phase must be DAY_DISCUSSION
+
+2. Judgment Vote Validation:
+   - Voter must be alive
+   - Voter must not be the accused
+   - Current phase must be JUDGMENT
+
+3. Vote Count Validation:
+   - Required votes = ceil(living_players / 2)
+   - Mayor's votes properly weighted (3 if revealed)
+
+4. Results Validation:
+   - All votes counted correctly
+   - Verdict logic: guilty > innocent for execution
+
+EDGE CASES:
+
+1. Player Dies During Trial:
+   - Rare: Disconnect/leave during their trial
+   - Solution: Continue trial, lynch if guilty (they're already marked as left)
+
+2. Majority Drops During Accusation:
+   - Players unvote, bringing count below majority before phase transition
+   - Solution: Cancel trial, return to discussion
+
+3. Mayor Reveals During Judgment:
+   - Mayor votes, then reveals mid-judgment
+   - Solution: Recount votes with Mayor's weight applied
+
+4. All Players Abstain:
+   - Everyone abstains in judgment
+   - Solution: innocent_count >= guilty_count (0 >= 0), pardon
+
+5. Jester Lynched:
+   - Jester voted guilty
+   - Solution: Jester wins (event victory), game continues
+   - Jester haunts one guilty voter next night
+
+6. Executioner's Target Lynched:
+   - Executioner's target voted guilty
+   - Solution: Executioner wins, game continues
+
+7. Only 3 Players Alive:
+   - Majority = 2 votes
+   - If 2 evils vote Town: Town gets lynched
+   - Check victory conditions after lynch
+
+8. Vote Spam:
+   - Player votes/unvotes rapidly
+   - Solution: Add 2-second cooldown between vote changes
+
+9. AI Vote Timeout:
+   - AI doesn't submit judgment vote in time
+   - Solution: Auto-abstain for AI
+
+10. Disconnected Player Has Majority Vote:
+    - Player disconnects but their vote remains
+    - Solution: Clear votes from disconnected players
+
+IMPLEMENTATION NOTES:
+
+```python
+from pydantic import BaseModel
+from typing import List, Optional
+from enum import Enum
+
+class VoteType(str, Enum):
+    GUILTY = "guilty"
+    INNOCENT = "innocent"
+    ABSTAIN = "abstain"
+
+class VotePhase(str, Enum):
+    NO_VOTE = "no_vote"
+    ACCUSATION = "accusation"
+    DEFENSE = "defense"
+    JUDGMENT = "judgment"
+    RESULTS = "results"
+
+class VoteTracker(BaseModel):
+    accused_player_id: Optional[int] = None
+    accusers: List[int] = []
+    required_votes: int
+    current_votes: int = 0
+    vote_phase: VotePhase = VotePhase.NO_VOTE
+
+class JudgmentVote(BaseModel):
+    voter_id: int
+    vote: VoteType
+
+class VoteResult(BaseModel):
+    accused_id: int
+    guilty_count: int
+    innocent_count: int
+    abstain_count: int
+    verdict: str  # "guilty" or "innocent"
+
+class VotingSystem:
+    def __init__(self):
+        self.tracker = None
+        self.judgment_votes: List[JudgmentVote] = []
+
+    def initiate_accusation(self, living_count: int):
+        self.tracker = VoteTracker(
+            required_votes=(living_count // 2) + 1
+        )
+
+    def vote_accuse(self, voter_id: int, accused_id: int, is_mayor: bool) -> bool:
+        if accused_id in [v.accused_player_id for v in [self.tracker]]:
+            return False  # Already on trial today
+
+        if self.tracker.accused_player_id and self.tracker.accused_player_id != accused_id:
+            # Different target, reset
+            self.tracker.accusers = []
+            self.tracker.current_votes = 0
+
+        self.tracker.accused_player_id = accused_id
+
+        if voter_id not in self.tracker.accusers:
+            self.tracker.accusers.append(voter_id)
+            votes_to_add = 3 if is_mayor else 1
+            self.tracker.current_votes += votes_to_add
+
+        return self.tracker.current_votes >= self.tracker.required_votes
+
+    def vote_judgment(self, voter_id: int, vote: VoteType):
+        # Remove previous vote from this voter
+        self.judgment_votes = [v for v in self.judgment_votes if v.voter_id != voter_id]
+        # Add new vote
+        self.judgment_votes.append(JudgmentVote(voter_id=voter_id, vote=vote))
+
+    def calculate_verdict(self, mayor_id: Optional[int]) -> VoteResult:
+        guilty = sum(1 for v in self.judgment_votes if v.vote == VoteType.GUILTY)
+        innocent = sum(1 for v in self.judgment_votes if v.vote == VoteType.INNOCENT)
+        abstain = sum(1 for v in self.judgment_votes if v.vote == VoteType.ABSTAIN)
+
+        # Mayor bonus
+        if mayor_id:
+            mayor_vote = next((v for v in self.judgment_votes if v.voter_id == mayor_id), None)
+            if mayor_vote:
+                if mayor_vote.vote == VoteType.GUILTY:
+                    guilty += 2
+                elif mayor_vote.vote == VoteType.INNOCENT:
+                    innocent += 2
+
+        verdict = "guilty" if guilty > innocent else "innocent"
+
+        return VoteResult(
+            accused_id=self.tracker.accused_player_id,
+            guilty_count=guilty,
+            innocent_count=innocent,
+            abstain_count=abstain,
+            verdict=verdict
+        )
+```
+
+Performance:
+  - Vote processing <10ms
+  - Real-time vote counter updates
+  - Efficient vote counting (O(n) where n = player count)
