@@ -34,7 +34,8 @@ class RoleRegistry:
         for category in ['town_investigative', 'town_killing', 'town_protective',
                         'town_support', 'mafia_killing', 'mafia_deception',
                         'mafia_support', 'neutral_killing', 'neutral_evil',
-                        'neutral_benign']:
+                        'neutral_benign', 'town_investigative_extra', 'town_support_extra',
+                        'mafia_deception_extra', 'neutral_killing_extra']:
             if category in config:
                 for role_id, role_data in config[category].items():
                     self._parse_role(role_data)

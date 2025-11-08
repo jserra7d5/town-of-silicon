@@ -35,6 +35,18 @@ class Player(BaseModel):
     ability_uses_remaining: dict[str, int] = {}
     last_action_night: int = 0
 
+    # Investigation results (for AI memory)
+    investigation_results: list["InvestigationResult"] = []
+
+
+class InvestigationResult(BaseModel):
+    """Result of investigating a player."""
+    night: int
+    target_id: int
+    target_name: str
+    investigation_type: str  # "sheriff", "investigator", "lookout", "spy"
+    result: str  # The actual result message
+
 
 class PlayerRoleAssignment(BaseModel):
     """Role assignment for game initialization."""

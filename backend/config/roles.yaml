@@ -570,6 +570,165 @@ neutral_benign:
         targets_required: 0
     immunities: []
 
+  amnesiac:
+    id: "amnesiac"
+    name: "Amnesiac"
+    faction: "Neutral"
+    category: "Neutral Benign"
+    alignment: "Neutral Benign"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Remember who you were and choose a role"
+    goal: "Remember a role and complete that role's objective"
+    abilities:
+      - name: "Remember"
+        description: "Remember the role of a dead player and become that role"
+        action_type: "remember"
+        priority: 5
+        max_uses: 1
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+# Additional Town Investigative
+
+town_investigative_extra:
+  spy:
+    id: "spy"
+    name: "Spy"
+    faction: "Town"
+    category: "Town Investigative"
+    alignment: "Town Investigative"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Bug houses to eavesdrop on conversations"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Bug"
+        description: "Bug a player to see who visits them and hear Mafia chat"
+        action_type: "investigate"
+        priority: 4
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+# Additional Town Support
+
+town_support_extra:
+  medium:
+    id: "medium"
+    name: "Medium"
+    faction: "Town"
+    category: "Town Support"
+    alignment: "Town Support"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Speak with the dead at night"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Seance"
+        description: "Speak with a dead player at night"
+        action_type: "seance"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  retributionist:
+    id: "retributionist"
+    name: "Retributionist"
+    faction: "Town"
+    category: "Town Support"
+    alignment: "Town Support"
+    attack: 0
+    defense: 0
+    unique: true
+    summary: "Revive a dead Town member"
+    goal: "Lynch every criminal and evildoer"
+    abilities:
+      - name: "Revive"
+        description: "Bring a dead Town member back to life"
+        action_type: "revive"
+        priority: 5
+        max_uses: 1
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+# Additional Mafia Deception
+
+mafia_deception_extra:
+  disguiser:
+    id: "disguiser"
+    name: "Disguiser"
+    faction: "Mafia"
+    category: "Mafia Deception"
+    alignment: "Mafia Deception"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Disguise yourself as a Town member"
+    goal: "Kill anyone that will not submit to the Mafia"
+    abilities:
+      - name: "Disguise"
+        description: "Disguise as your target if they die"
+        action_type: "disguise"
+        priority: 7
+        max_uses: 3
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+  hypnotist:
+    id: "hypnotist"
+    name: "Hypnotist"
+    faction: "Mafia"
+    category: "Mafia Deception"
+    alignment: "Mafia Deception"
+    attack: 0
+    defense: 0
+    unique: false
+    summary: "Hypnotize players to confuse them"
+    goal: "Kill anyone that will not submit to the Mafia"
+    abilities:
+      - name: "Hypnotize"
+        description: "Hypnotize a player to give them false information"
+        action_type: "hypnotize"
+        priority: 5
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
+# Additional Neutral Killing
+
+neutral_killing_extra:
+  juggernaut:
+    id: "juggernaut"
+    name: "Juggernaut"
+    faction: "Neutral"
+    category: "Neutral Killing"
+    alignment: "Neutral Killing"
+    attack: 1  # Escalates with each kill
+    defense: 1  # Increases with kills
+    unique: true
+    summary: "Grow stronger with each kill"
+    goal: "Kill everyone who would oppose you"
+    abilities:
+      - name: "Rampage"
+        description: "Attack a player (power increases with kills)"
+        action_type: "attack"
+        priority: 6
+        max_uses: null
+        cooldown_nights: 0
+        targets_required: 1
+    immunities: []
+
 # ROLE LISTS
 
 role_lists:

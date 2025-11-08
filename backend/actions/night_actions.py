@@ -52,6 +52,8 @@ class NightResolutionSummary(BaseModel):
     roleblocked_players: set[int] = set()
     transported_pairs: list[tuple[int, int]] = []
     protected_players: set[int] = set()
+    framed_players: set[int] = set()  # Players framed by Framer tonight
+    visitors: dict[int, list[int]] = {}  # target_id -> [visitor_ids] for Lookout
 
 
 # ============================================================================
@@ -136,6 +138,10 @@ class NightActionResolver:
                 f"to {actual_target} by Transporter"
             )
             action.redirected_to = actual_target
+
+        # Track visitor (for Lookout) - track after transport resolution
+        if actual_target is not None:
+            self._track_visitor(action.player_id, actual_target)
 
         # Route to specific handler
         if ability_name in ["escort", "consort"]:
@@ -258,25 +264,41 @@ class NightActionResolver:
         target = self._get_player(game_state, target_id)
         ability_name = action.ability.name.lower()
 
-        # Check if target is framed
-        # TODO: Check framing status from game state
+        # Framing is checked in _get_sheriff_result() for Sheriff investigations
 
         if ability_name == "interrogate":  # Sheriff
             # Sheriff gets "Mafia/SK" or "Not Suspicious"
             result = self._get_sheriff_result(target)
+            investigation_type = "sheriff"
 
         elif ability_name == "investigate":  # Investigator
             # Investigator gets role grouping
             result = self._get_investigator_result(target)
+            investigation_type = "investigator"
 
         elif ability_name == "watch":  # Lookout
             # Lookout sees who visited target
             result = self._get_lookout_result(game_state, target_id)
+            investigation_type = "lookout"
 
         else:
             result = "Your investigation was inconclusive."
+            investigation_type = "unknown"
 
         logger.info(f"Player {action.player_id} investigated {target_id}: {result}")
+
+        # Store investigation result for AI memory
+        from ..models.player import InvestigationResult
+        investigator = self._get_player(game_state, action.player_id)
+        investigator.investigation_results.append(
+            InvestigationResult(
+                night=game_state.current_day,
+                target_id=target_id,
+                target_name=target.name,
+                investigation_type=investigation_type,
+                result=result
+            )
+        )
 
         return NightActionResult(
             action=action,
@@ -362,8 +384,8 @@ class NightActionResolver:
 
         target = self._get_player(game_state, target_id)
 
-        # In full implementation, would mark target as framed in game state
-        # For now, just log it
+        # Add target to framed players set - affects Sheriff investigations tonight
+        self.summary.framed_players.add(target_id)
 
         logger.info(f"Player {action.player_id} framed {target_id}")
 
@@ -399,6 +421,16 @@ class NightActionResolver:
     # ========================================================================
     # Helper Methods
     # ========================================================================
+
+    def _track_visitor(self, player_id: int, target_id: Optional[int]) -> None:
+        """Track that player_id visited target_id (for Lookout)."""
+        if target_id is None:
+            return
+
+        if target_id not in self.summary.visitors:
+            self.summary.visitors[target_id] = []
+
+        self.summary.visitors[target_id].append(player_id)
 
     def _resolve_transport(self, target_id: Optional[int]) -> Optional[int]:
         """Resolve transport redirection."""
@@ -439,6 +471,10 @@ class NightActionResolver:
         """Get Sheriff investigation result."""
         role = target.role
 
+        # Check if target is framed tonight - framed players appear as Mafia
+        if target.player_id in self.summary.framed_players:
+            return f"{target.name} is a member of the Mafia!"
+
         # Sheriff detects Mafia and Serial Killer
         if role.faction in ["Mafia"]:
             return f"{target.name} is a member of the Mafia!"
@@ -474,13 +510,10 @@ class NightActionResolver:
         target_id: int
     ) -> str:
         """Get Lookout result (who visited target)."""
-        # In full implementation, would track all visits to target
-        # For now, simplified
-
         target = self._get_player(game_state, target_id)
 
-        # TODO: Track visitors in resolution
-        visitors = []
+        # Get visitors from tracking
+        visitors = self.summary.visitors.get(target_id, [])
 
         if not visitors:
             return f"No one visited {target.name}."

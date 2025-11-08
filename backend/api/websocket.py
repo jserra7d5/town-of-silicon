@@ -235,6 +235,9 @@ class WebSocketHandler:
         elif msg_type == "update_will":
             await self.handle_update_will(message, player_id)
 
+        elif msg_type == "update_death_note":
+            await self.handle_update_death_note(message, player_id)
+
         elif msg_type == "request_game_state":
             await self.send_game_state(websocket)
 
@@ -424,6 +427,44 @@ class WebSocketHandler:
                 player_id
             )
             logger.info(f"Player {player_id} updated their will")
+        else:
+            # Send error
+            await self.manager.send_to_player(
+                {
+                    "type": "error",
+                    "message": error
+                },
+                player_id
+            )
+
+    async def handle_update_death_note(self, message: WSMessage, player_id: Optional[int]):
+        """Handle death note update from player."""
+        if not player_id or not self.game_state:
+            return
+
+        note_text = message.data.get("death_note", "")
+
+        # Import death note manager
+        from ..communication.death_note import DeathNoteManager
+        note_mgr = DeathNoteManager()
+
+        # Update death note
+        success, error = note_mgr.update_death_note(
+            self.game_state,
+            player_id,
+            note_text
+        )
+
+        if success:
+            # Send confirmation
+            await self.manager.send_to_player(
+                {
+                    "type": "death_note_updated",
+                    "message": "Death note updated successfully"
+                },
+                player_id
+            )
+            logger.info(f"Player {player_id} updated their death note")
         else:
             # Send error
             await self.manager.send_to_player(

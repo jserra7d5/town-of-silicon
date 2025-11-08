@@ -588,6 +588,9 @@ class GameOrchestrator:
             f"{accused.name} was lynched. They were a {accused.role.name}."
         )
 
+        # Check for individual role wins (Jester, Executioner)
+        await self.check_individual_wins(accused_id)
+
         # Clear accused
         self.game_state.accused_player_id = None
 
@@ -615,6 +618,37 @@ class GameOrchestrator:
         # Update contexts
         self.context_manager.update_all_contexts(self.game_state)
 
+    async def check_individual_wins(self, lynched_player_id: int) -> None:
+        """
+        Check for individual role wins (Jester, Executioner) after a lynch.
+
+        Args:
+            lynched_player_id: ID of the player who was just lynched
+        """
+        lynched_player = next(
+            (p for p in self.game_state.players if p.player_id == lynched_player_id),
+            None
+        )
+
+        if not lynched_player:
+            return
+
+        # Check if Jester was lynched
+        if lynched_player.role.id == "jester":
+            logger.info(f"Jester {lynched_player.name} wins by getting lynched!")
+            await self.broadcast_system_message(
+                f"🎭 {lynched_player.name} was a Jester and wins by getting lynched!"
+            )
+            # Jester can choose to kill someone who voted guilty (not implemented yet)
+
+        # Check if any Executioner's target was lynched
+        for player in self.game_state.players:
+            if player.role.id == "executioner" and player.is_alive:
+                # Check if this player's target was lynched
+                # Executioner target is stored in role metadata (not implemented in current model)
+                # For now, we'll skip this - would need to add target tracking to Player model
+                pass
+
     def check_victory(self) -> Optional[str]:
         """
         Check if any faction has won.
@@ -627,22 +661,42 @@ class GameOrchestrator:
         if not alive_players:
             return "draw"
 
-        # Count alive by faction
+        # Count alive by faction and role
         alive_by_faction = {}
+        alive_roles = {}
+
         for player in alive_players:
-            faction = player.role.faction
+            faction = player.role.faction.value if hasattr(player.role.faction, 'value') else str(player.role.faction)
+            role_id = player.role.id
+
             alive_by_faction[faction] = alive_by_faction.get(faction, 0) + 1
+            alive_roles[role_id] = alive_roles.get(role_id, 0) + 1
 
-        # Town wins if all evils dead
-        if alive_by_faction.get("Mafia", 0) == 0 and alive_by_faction.get("Neutral Killing", 0) == 0:
-            return "Town"
-
-        # Mafia wins if they equal or outnumber town
-        mafia_count = alive_by_faction.get("Mafia", 0)
         town_count = alive_by_faction.get("Town", 0)
+        mafia_count = alive_by_faction.get("Mafia", 0)
+        nk_count = alive_by_faction.get("Neutral Killing", 0)
+        neutral_evil_count = alive_by_faction.get("Neutral Evil", 0)
+        neutral_benign_count = alive_by_faction.get("Neutral Benign", 0)
 
-        if mafia_count >= town_count:
+        # Serial Killer solo win: Only Serial Killers (and maybe Survivors) remain
+        if nk_count > 0 and town_count == 0 and mafia_count == 0 and neutral_evil_count == 0:
+            # Check if only NK and neutral benign remain
+            if alive_roles.get("serial_killer", 0) > 0:
+                return "Serial Killer"
+            elif alive_roles.get("arsonist", 0) > 0:
+                return "Arsonist"
+            elif alive_roles.get("werewolf", 0) > 0:
+                return "Werewolf"
+            elif alive_roles.get("juggernaut", 0) > 0:
+                return "Juggernaut"
+
+        # Mafia wins if they equal or outnumber town (and no NK left)
+        if mafia_count > 0 and mafia_count >= town_count and nk_count == 0:
             return "Mafia"
+
+        # Town wins if all evils dead (Mafia, NK, and non-benign neutrals)
+        if mafia_count == 0 and nk_count == 0 and neutral_evil_count == 0:
+            return "Town"
 
         # No winner yet
         return None
@@ -654,6 +708,22 @@ class GameOrchestrator:
         self.running = False
 
         await self.broadcast_system_message(f"Game Over! {winner} wins!")
+
+        # Determine individual winners
+        individual_winners = []
+
+        # Survivors win if they're alive
+        for player in self.game_state.players:
+            if player.is_alive and player.role.id == "survivor":
+                individual_winners.append(f"{player.name} (Survivor)")
+            # Amnesiac wins with the faction they remembered
+            elif player.is_alive and player.role.id == "amnesiac":
+                individual_winners.append(f"{player.name} (Amnesiac)")
+
+        if individual_winners:
+            await self.broadcast_system_message(
+                f"Also won: {', '.join(individual_winners)}"
+            )
 
         # Show all roles
         role_reveal = "Final roles:\n"
