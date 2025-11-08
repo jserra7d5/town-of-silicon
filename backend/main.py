@@ -152,6 +152,66 @@ async def get_game_state():
     return game_orchestrator.game_state.model_dump()
 
 
+@app.post("/api/game/save")
+async def save_game(save_name: str = None):
+    """Save the current game."""
+    if not game_orchestrator:
+        return {"error": "Game orchestrator not initialized"}
+
+    if not game_orchestrator.game_state:
+        return {"error": "No active game to save"}
+
+    try:
+        save_path = game_orchestrator.save_game(save_name)
+        return {
+            "status": "success",
+            "message": "Game saved successfully",
+            "save_path": save_path
+        }
+    except Exception as e:
+        logger.error(f"Error saving game: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/game/load")
+async def load_game(save_name: str):
+    """Load a saved game."""
+    if not game_orchestrator:
+        return {"error": "Game orchestrator not initialized"}
+
+    try:
+        game_state = await game_orchestrator.load_game(save_name)
+        return {
+            "status": "success",
+            "message": "Game loaded successfully",
+            "game_id": game_state.game_id,
+            "current_day": game_state.current_day,
+            "current_phase": game_state.current_phase.phase_type.value
+        }
+    except FileNotFoundError:
+        return {"error": f"Save file not found: {save_name}"}
+    except Exception as e:
+        logger.error(f"Error loading game: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/game/saves")
+async def list_saves():
+    """List all available save files."""
+    if not game_orchestrator:
+        return {"error": "Game orchestrator not initialized"}
+
+    try:
+        saves = game_orchestrator.list_saves()
+        return {
+            "status": "success",
+            "saves": [save.model_dump() for save in saves]
+        }
+    except Exception as e:
+        logger.error(f"Error listing saves: {e}")
+        return {"error": str(e)}
+
+
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

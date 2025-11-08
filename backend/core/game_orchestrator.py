@@ -16,6 +16,7 @@ from ..ai.decision_engine import AIDecisionEngine
 from ..actions.night_actions import NightActionResolver, NightAction
 from ..actions.voting import VotingManager, Vote
 from ..api.websocket import WebSocketHandler, ConnectionManager
+from ..core.game_persistence import GamePersistence
 from ..config.settings import settings
 
 
@@ -50,6 +51,9 @@ class GameOrchestrator:
         # Communication
         self.connection_manager = ConnectionManager()
         self.ws_handler = WebSocketHandler(self.connection_manager)
+
+        # Persistence
+        self.persistence = GamePersistence()
 
         # Game state
         self.game_state: Optional[GameState] = None
@@ -860,3 +864,100 @@ class GameOrchestrator:
     def on_phase_end(self, phase_type: PhaseType):
         """Callback when phase ends."""
         logger.info(f"Phase ended: {phase_type.value}")
+
+        # Auto-save at end of each day
+        if phase_type == PhaseType.NIGHT:
+            try:
+                self.save_game_auto()
+            except Exception as e:
+                logger.error(f"Auto-save failed: {e}")
+
+    def save_game(self, save_name: Optional[str] = None) -> str:
+        """
+        Save current game state.
+
+        Args:
+            save_name: Optional name for the save
+
+        Returns:
+            Path to saved file
+        """
+        if not self.game_state:
+            raise RuntimeError("No game to save")
+
+        try:
+            save_path = self.persistence.save_game(self.game_state, save_name)
+            logger.success(f"Game saved: {save_path}")
+            return save_path
+        except Exception as e:
+            logger.error(f"Failed to save game: {e}")
+            raise
+
+    def save_game_auto(self) -> Optional[str]:
+        """
+        Create an autosave.
+
+        Returns:
+            Path to autosave file, or None if save failed
+        """
+        if not self.game_state:
+            return None
+
+        try:
+            save_path = self.persistence.autosave(self.game_state)
+            logger.info(f"Auto-saved: {save_path}")
+            return save_path
+        except Exception as e:
+            logger.error(f"Auto-save failed: {e}")
+            return None
+
+    async def load_game(self, save_name: str) -> GameState:
+        """
+        Load game from save file and restore state.
+
+        Args:
+            save_name: Name of save file to load
+
+        Returns:
+            Loaded game state
+        """
+        try:
+            # Load game state
+            loaded_state = self.persistence.load_game(save_name)
+
+            # Set as current game state
+            self.game_state = loaded_state
+            self.ws_handler.set_game_state(loaded_state)
+
+            # Find human player
+            for player in loaded_state.players:
+                if player.is_human:
+                    self.human_player_id = player.player_id
+                    break
+
+            # Restore AI contexts
+            self.context_manager.update_all_contexts(loaded_state)
+
+            # Broadcast loaded state to all clients
+            await self.ws_handler.broadcast_game_state()
+
+            await self.broadcast_system_message(
+                f"Game loaded from save (Day {loaded_state.current_day}, "
+                f"{loaded_state.current_phase.phase_type.value})"
+            )
+
+            logger.success(f"Game loaded and restored")
+            return loaded_state
+
+        except Exception as e:
+            logger.error(f"Failed to load game: {e}")
+            raise
+
+    def list_saves(self):
+        """
+        List all available save files.
+
+        Returns:
+            List of save metadata
+        """
+        return self.persistence.list_saves()
