@@ -224,39 +224,45 @@ class GameOrchestrator:
             f"The Mafia is meeting in secret..."
         )
 
-        # AI Mafia members discuss strategy
+        # AI Mafia members discuss strategy (batched for performance)
         ai_mafia = [m for m in mafia_members if not m.is_human]
 
-        for mafia in ai_mafia:
-            # Decide if this Mafia member wants to say something
-            decision = await self.decision_engine.decide_chat_message(
+        if ai_mafia:
+            # Get all Mafia chat decisions in parallel
+            chat_decisions = await self.decision_engine.batch_decide_chat(
                 self.game_state,
-                mafia.player_id,
+                [m.player_id for m in ai_mafia],
                 context_hint="Mafia night chat - coordinate with other Mafia members"
             )
 
-            if decision.should_speak and decision.message:
-                mafia_chat_msg = ChatMessage(
-                    player_id=mafia.player_id,
-                    player_name=f"[MAFIA] {mafia.name}",
-                    message=decision.message,
-                    phase=PhaseType.NIGHT.value,
-                    day_number=self.game_state.current_day,
-                    visible_to_dead=False
-                )
+            # Process chat messages
+            for mafia in ai_mafia:
+                decision = chat_decisions.get(mafia.player_id)
+                if not decision:
+                    continue
 
-                self.game_state.all_chat_messages.append(mafia_chat_msg)
+                if decision.should_speak and decision.message:
+                    mafia_chat_msg = ChatMessage(
+                        player_id=mafia.player_id,
+                        player_name=f"[MAFIA] {mafia.name}",
+                        message=decision.message,
+                        phase=PhaseType.NIGHT.value,
+                        day_number=self.game_state.current_day,
+                        visible_to_dead=False
+                    )
 
-                # Broadcast to Mafia only
-                await self.connection_manager.broadcast_to_mafia(
-                    {
-                        "type": "mafia_chat",
-                        "message": mafia_chat_msg.model_dump()
-                    },
-                    self.game_state
-                )
+                    self.game_state.all_chat_messages.append(mafia_chat_msg)
 
-                logger.info(f"Mafia {mafia.name}: {decision.message}")
+                    # Broadcast to Mafia only
+                    await self.connection_manager.broadcast_to_mafia(
+                        {
+                            "type": "mafia_chat",
+                            "message": mafia_chat_msg.model_dump()
+                        },
+                        self.game_state
+                    )
+
+                    logger.info(f"Mafia {mafia.name}: {decision.message}")
 
         # Short delay for human Mafia member to read/respond
         if any(m.is_human for m in mafia_members):
@@ -445,20 +451,26 @@ class GameOrchestrator:
             if p.is_alive and not p.is_human
         ]
 
-        # AIs make occasional chat messages during day
+        # AIs make occasional chat messages during day (batched for performance)
+        import random
         for _ in range(3):  # 3 rounds of chat
             # Random selection of AIs to speak
-            import random
             speakers = random.sample(
                 ai_players,
                 min(3, len(ai_players))  # 3 AIs speak per round
             )
 
+            # Get all chat decisions in parallel
+            chat_decisions = await self.decision_engine.batch_decide_chat(
+                self.game_state,
+                [p.player_id for p in speakers]
+            )
+
+            # Process chat messages
             for player in speakers:
-                decision = await self.decision_engine.decide_chat_message(
-                    self.game_state,
-                    player.player_id
-                )
+                decision = chat_decisions.get(player.player_id)
+                if not decision:
+                    continue
 
                 if decision.should_speak and decision.message:
                     chat_msg = ChatMessage(

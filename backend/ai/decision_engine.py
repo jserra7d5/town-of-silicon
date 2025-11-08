@@ -530,3 +530,51 @@ class AIDecisionEngine:
                     results[player_id] = result
 
         return results
+
+    async def batch_decide_chat(
+        self,
+        game_state: GameState,
+        player_ids: list[int],
+        context_hint: Optional[str] = None
+    ) -> dict[int, ChatDecision]:
+        """
+        Process multiple chat decisions in parallel batches.
+
+        Args:
+            game_state: Current game state
+            player_ids: List of player IDs making decisions
+            context_hint: Optional hint about what to discuss
+
+        Returns:
+            Dict mapping player_id to ChatDecision
+        """
+        results = {}
+        batch_size = settings.ai_batch_size
+
+        for i in range(0, len(player_ids), batch_size):
+            batch = player_ids[i:i + batch_size]
+
+            logger.info(
+                f"Processing chat decision batch {i//batch_size + 1} "
+                f"({len(batch)} AIs)"
+            )
+
+            tasks = [
+                self.decide_chat_message(game_state, player_id, context_hint)
+                for player_id in batch
+            ]
+
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for player_id, result in zip(batch, batch_results):
+                if isinstance(result, Exception):
+                    logger.error(f"Error for player {player_id}: {result}")
+                    results[player_id] = ChatDecision(
+                        should_speak=False,
+                        message=None,
+                        message_type="normal"
+                    )
+                else:
+                    results[player_id] = result
+
+        return results
