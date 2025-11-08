@@ -229,6 +229,12 @@ class WebSocketHandler:
         elif msg_type == "defense":
             await self.handle_defense(message, player_id)
 
+        elif msg_type == "whisper":
+            await self.handle_whisper(message, player_id)
+
+        elif msg_type == "update_will":
+            await self.handle_update_will(message, player_id)
+
         elif msg_type == "request_game_state":
             await self.send_game_state(websocket)
 
@@ -340,6 +346,93 @@ class WebSocketHandler:
         })
 
         logger.info(f"Player {player_id} submitted defense: {defense}")
+
+    async def handle_whisper(self, message: WSMessage, player_id: Optional[int]):
+        """Handle whisper message from player."""
+        if not player_id or not self.game_state:
+            return
+
+        to_player_id = message.data.get("to_player_id")
+        whisper_message = message.data.get("message", "")
+
+        # Import whisper manager (lazy import to avoid circular dependencies)
+        from ..communication.whisper import WhisperManager
+        whisper_mgr = WhisperManager()
+
+        # Send whisper
+        success, error, whisper = whisper_mgr.send_whisper(
+            self.game_state,
+            player_id,
+            to_player_id,
+            whisper_message
+        )
+
+        if success and whisper:
+            # Send whisper to both sender and recipient
+            await self.manager.send_to_player(
+                {
+                    "type": "whisper",
+                    "message": whisper.model_dump()
+                },
+                player_id
+            )
+
+            await self.manager.send_to_player(
+                {
+                    "type": "whisper",
+                    "message": whisper.model_dump()
+                },
+                to_player_id
+            )
+
+            logger.info(f"Whisper sent from {player_id} to {to_player_id}")
+        else:
+            # Send error back to sender
+            await self.manager.send_to_player(
+                {
+                    "type": "error",
+                    "message": error
+                },
+                player_id
+            )
+
+    async def handle_update_will(self, message: WSMessage, player_id: Optional[int]):
+        """Handle last will update from player."""
+        if not player_id or not self.game_state:
+            return
+
+        will_text = message.data.get("will", "")
+
+        # Import last will manager
+        from ..communication.last_will import LastWillManager
+        will_mgr = LastWillManager()
+
+        # Update will
+        success, error = will_mgr.update_will(
+            self.game_state,
+            player_id,
+            will_text
+        )
+
+        if success:
+            # Send confirmation
+            await self.manager.send_to_player(
+                {
+                    "type": "will_updated",
+                    "message": "Will updated successfully"
+                },
+                player_id
+            )
+            logger.info(f"Player {player_id} updated their will")
+        else:
+            # Send error
+            await self.manager.send_to_player(
+                {
+                    "type": "error",
+                    "message": error
+                },
+                player_id
+            )
 
     async def send_game_state(self, websocket: WebSocket):
         """Send current game state to client."""

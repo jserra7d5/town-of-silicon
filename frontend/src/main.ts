@@ -4,7 +4,7 @@
  * Canvas-based, chatbot-centric UI for Town of Salem with AI agents.
  */
 
-import { Game } from './canvas/Game';
+import { InteractiveGame } from './canvas/InteractiveGame';
 import { WebSocketClient } from './api/websocket';
 
 // Initialize canvas
@@ -27,8 +27,8 @@ window.addEventListener('resize', resizeCanvas);
 // Initialize WebSocket connection
 const ws = new WebSocketClient('ws://localhost:8000/ws');
 
-// Initialize game
-const game = new Game(canvas, ctx, ws);
+// Initialize interactive game
+const game = new InteractiveGame(canvas, ctx, ws);
 
 // Hide loading screen when ready
 async function init() {

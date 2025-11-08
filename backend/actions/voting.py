@@ -225,10 +225,8 @@ class VotingManager:
             return False, "You are dead"
 
         # Check if blackmailed
-        # TODO: Check blackmail status
-
-        # Check if mayor revealed
-        # (Revealed mayor can't be voted against during the day in some variants)
+        if self._is_blackmailed(game_state, player_id):
+            return False, "You have been blackmailed!"
 
         return True, "OK"
 
@@ -250,9 +248,9 @@ class VotingManager:
             return False
 
         # Mark mayor as revealed
-        # TODO: Add revealed status to player
+        player.revealed = True
 
-        logger.info(f"Player {player_id} ({player.name}) revealed as Mayor!")
+        logger.info(f"Player {player_id} ({player.name}) revealed as Mayor! They now have 3 votes.")
 
         return True
 
@@ -289,14 +287,12 @@ class VotingManager:
         player = self._get_player(game_state, voter_id)
 
         # Mayor has 3 votes if revealed
-        # TODO: Check if mayor is revealed
-        if player.role.id == "mayor":
-            # For now, assume not revealed unless explicitly marked
-            return 1
+        if player.role.id == "mayor" and player.revealed:
+            return 3
 
         return 1
 
     def _is_blackmailed(self, game_state: GameState, player_id: int) -> bool:
         """Check if player is blackmailed."""
-        # TODO: Implement blackmail tracking
-        return False
+        player = self._get_player(game_state, player_id)
+        return player.is_blackmailed

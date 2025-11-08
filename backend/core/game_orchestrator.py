@@ -256,8 +256,30 @@ class GameOrchestrator:
         human = self.game_state.players[self.human_player_id]
         if human.is_alive and human.role.abilities:
             # Wait for human to submit action via WebSocket
-            # For now, skip human action (would come from ws_handler.action_queue)
-            pass
+            logger.info(f"Waiting for human player action...")
+
+            # Wait up to 30 seconds for human action
+            human_action = None
+            try:
+                human_action_data = await asyncio.wait_for(
+                    self.ws_handler.action_queue.get(),
+                    timeout=30.0
+                )
+
+                if human_action_data.get("type") == "night_action":
+                    ability = human.role.abilities[0]
+                    human_action = NightAction(
+                        player_id=self.human_player_id,
+                        ability=ability,
+                        target_id=human_action_data.get("target_id"),
+                        priority=ability.priority
+                    )
+                    actions.append(human_action)
+                    logger.info(f"Human player submitted night action targeting {human_action.target_id}")
+
+            except asyncio.TimeoutError:
+                logger.warning("Human player did not submit action in time")
+                # No action submitted - human skips their turn
 
         # Run phase timer
         await self.phase_manager.run_phase_loop()
@@ -342,7 +364,7 @@ class GameOrchestrator:
             # Wait a bit between chat rounds
             await asyncio.sleep(5)
 
-        # Collect accusation votes
+        # Collect accusation votes from AIs
         vote_decisions = await self.decision_engine.batch_decide_votes(
             self.game_state,
             [p.player_id for p in ai_players],
@@ -357,6 +379,29 @@ class GameOrchestrator:
             )
             for player_id, decision in vote_decisions.items()
         ]
+
+        # Collect human vote if alive
+        human = self.game_state.players[self.human_player_id]
+        if human.is_alive:
+            logger.info("Waiting for human player vote...")
+            try:
+                human_vote_data = await asyncio.wait_for(
+                    self.ws_handler.action_queue.get(),
+                    timeout=30.0
+                )
+
+                if human_vote_data.get("type") == "vote":
+                    human_vote = Vote(
+                        voter_id=self.human_player_id,
+                        target_id=human_vote_data.get("target_id"),
+                        vote_type="accusation"
+                    )
+                    votes.append(human_vote)
+                    logger.info(f"Human voted for player {human_vote.target_id}")
+
+            except asyncio.TimeoutError:
+                logger.warning("Human player did not vote (abstain)")
+                # Abstain - no vote added
 
         # Process votes
         result = self.voting_manager.process_accusation_votes(
@@ -449,6 +494,31 @@ class GameOrchestrator:
             )
             for player_id, decision in vote_decisions.items()
         ]
+
+        # Collect human judgment vote if alive and not accused
+        human = self.game_state.players[self.human_player_id]
+        if human.is_alive and human.player_id != self.game_state.accused_player_id:
+            logger.info("Waiting for human player judgment vote...")
+            try:
+                human_vote_data = await asyncio.wait_for(
+                    self.ws_handler.action_queue.get(),
+                    timeout=20.0
+                )
+
+                if human_vote_data.get("type") == "vote":
+                    human_vote = Vote(
+                        voter_id=self.human_player_id,
+                        target_id=self.game_state.accused_player_id,
+                        vote_type="judgment",
+                        guilty=human_vote_data.get("guilty")
+                    )
+                    votes.append(human_vote)
+                    verdict = "guilty" if human_vote.guilty else "innocent"
+                    logger.info(f"Human voted {verdict}")
+
+            except asyncio.TimeoutError:
+                logger.warning("Human player did not vote (abstain)")
+                # Abstain - no vote added
 
         # Process judgment
         result = self.voting_manager.process_judgment_votes(
