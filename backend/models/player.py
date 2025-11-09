@@ -25,6 +25,12 @@ class Player(BaseModel):
     on_trial: bool = False
     voted_today: bool = False
 
+    # Role-specific states
+    is_doused: bool = False  # Arsonist target
+    is_vested: bool = False  # Survivor vest active
+    is_alerted: bool = False  # Veteran alert active
+    jailed_by: Optional[int] = None  # Player ID of Jailor (if jailed)
+
     # Death info (legacy fields for compatibility)
     death_night: int = 0
     death_day: int = 0

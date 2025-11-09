@@ -296,3 +296,11 @@ class VotingManager:
         """Check if player is blackmailed."""
         player = self._get_player(game_state, player_id)
         return player.is_blackmailed
+
+def clear_day_states(game_state: GameState) -> None:
+    """Clear temporary day-specific states on all players."""
+    for player in game_state.players:
+        # Clear blackmail at start of day
+        player.is_blackmailed = False
+        player.can_speak = True
+        player.voted_today = False

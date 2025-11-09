@@ -90,6 +90,9 @@ class NightActionResolver:
         # Reset summary
         self.summary = NightResolutionSummary()
 
+        # Clear temporary night-specific states
+        self._clear_night_states(game_state)
+
         # Sort actions by priority (lower = higher priority)
         actions.sort(key=lambda a: a.priority)
 
@@ -144,7 +147,34 @@ class NightActionResolver:
             self._track_visitor(action.player_id, actual_target)
 
         # Route to specific handler
-        if ability_name in ["escort", "consort"]:
+        if ability_name == "jail":
+            return self._handle_jail(game_state, action, actual_target)
+
+        elif ability_name == "execute":
+            return self._handle_execute(game_state, action)
+
+        elif ability_name == "alert":
+            return self._handle_alert(game_state, action)
+
+        elif ability_name == "vest":
+            return self._handle_vest(game_state, action)
+
+        elif ability_name == "blackmail":
+            return self._handle_blackmail(game_state, action, actual_target)
+
+        elif ability_name == "douse":
+            return self._handle_douse(game_state, action, actual_target)
+
+        elif ability_name == "ignite":
+            return self._handle_ignite(game_state, action)
+
+        elif ability_name == "maul":
+            return self._handle_maul(game_state, action, actual_target)
+
+        elif ability_name == "control":
+            return self._handle_control(game_state, action)
+
+        elif ability_name in ["escort", "consort", "roleblock"]:
             return self._handle_roleblock(game_state, action, actual_target)
 
         elif ability_name == "transport":
@@ -153,10 +183,37 @@ class NightActionResolver:
         elif ability_name in ["heal", "protect"]:
             return self._handle_protect(game_state, action, actual_target)
 
+        elif ability_name in ["guard"]:
+            return self._handle_guard(game_state, action, actual_target)
+
         elif ability_name in ["interrogate", "investigate", "watch"]:
             return self._handle_investigate(game_state, action, actual_target)
 
-        elif ability_name in ["attack", "shoot", "assassinate"]:
+        elif ability_name == "bug":
+            return self._handle_spy(game_state, action, actual_target)
+
+        elif ability_name == "seance":
+            return self._handle_medium_seance(game_state, action, actual_target)
+
+        elif ability_name == "revive":
+            return self._handle_retributionist_revive(game_state, action, actual_target)
+
+        elif ability_name == "disguise":
+            return self._handle_disguise(game_state, action, actual_target)
+
+        elif ability_name == "hypnotize":
+            return self._handle_hypnotize(game_state, action, actual_target)
+
+        elif ability_name == "rampage":
+            return self._handle_juggernaut_rampage(game_state, action, actual_target)
+
+        elif ability_name == "forge":
+            return self._handle_forge_will(game_state, action, actual_target)
+
+        elif ability_name == "remember":
+            return self._handle_amnesiac_remember(game_state, action, actual_target)
+
+        elif ability_name in ["attack", "shoot", "assassinate", "kill"]:
             return self._handle_attack(game_state, action, actual_target)
 
         elif ability_name == "frame":
@@ -185,10 +242,39 @@ class NightActionResolver:
                 message="You decided not to roleblock anyone."
             )
 
+        target = self._get_player(game_state, target_id)
+
+        # Check if target is Serial Killer - they kill roleblockers
+        if target.role.id == "serial_killer":
+            # Serial Killer kills the roleblocker
+            death = DeathInfo(
+                player_id=action.player_id,
+                day_number=game_state.current_day,
+                phase="Night",
+                cause="Killed by Serial Killer",
+                killer_id=target_id
+            )
+            self.summary.deaths.append(death)
+
+            logger.info(f"Serial Killer {target_id} killed roleblocker {action.player_id}")
+
+            return NightActionResult(
+                action=action,
+                message=f"You were killed by a Serial Killer!",
+                target_message="You were roleblocked but you killed your attacker!",
+                kill_successful=True
+            )
+
+        # Check if target is immune to roleblocking
+        if "roleblock" in target.role.immunities:
+            return NightActionResult(
+                action=action,
+                message=f"{target.name} is immune to roleblocking!",
+                target_message="Someone tried to roleblock you but you are immune!"
+            )
+
         # Add to roleblocked set
         self.summary.roleblocked_players.add(target_id)
-
-        target = self._get_player(game_state, target_id)
 
         logger.info(f"Player {action.player_id} roleblocked {target_id}")
 
@@ -321,6 +407,26 @@ class NightActionResolver:
 
         target = self._get_player(game_state, target_id)
 
+        # Check if target is an alerted Veteran - they kill all visitors
+        if target.is_alerted:
+            # Veteran kills the attacker
+            death = DeathInfo(
+                player_id=action.player_id,
+                day_number=game_state.current_day,
+                phase="Night",
+                cause="Killed by Veteran",
+                killer_id=target_id
+            )
+            self.summary.deaths.append(death)
+
+            logger.info(f"Alerted Veteran {target_id} killed attacker {action.player_id}")
+
+            return NightActionResult(
+                action=action,
+                message=f"You were killed by a Veteran on alert!",
+                kill_successful=False
+            )
+
         # Check if target is protected
         if target_id in self.summary.protected_players:
             logger.info(
@@ -407,15 +513,25 @@ class NightActionResolver:
                 message="You decided not to clean anyone."
             )
 
-        # Janitor cleans a dead body (hides role)
-        # In full implementation, would check if target died tonight
-        # and mark them as cleaned
+        target = self._get_player(game_state, target_id)
 
-        logger.info(f"Player {action.player_id} cleaned {target_id}")
+        # Mark target for cleaning - will be applied if they die tonight
+        # Check if target dies in the deaths list and mark as cleaned
+        for death in self.summary.deaths:
+            if death.player_id == target_id:
+                death.cleaned = True
+                logger.info(f"Janitor {action.player_id} cleaned {target_id}")
+                return NightActionResult(
+                    action=action,
+                    message=f"You cleaned {target.name}'s body. Their role and will are hidden."
+                )
+
+        # Target didn't die, cleaning saved for later
+        logger.info(f"Janitor {action.player_id} prepared to clean {target_id}")
 
         return NightActionResult(
             action=action,
-            message=f"You will clean your target if they die."
+            message=f"You will clean {target.name} if they die tonight."
         )
 
     # ========================================================================
@@ -520,3 +636,605 @@ class NightActionResolver:
 
         visitor_names = [self._get_player(game_state, v).name for v in visitors]
         return f"Players who visited {target.name}: {', '.join(visitor_names)}"
+
+    # ========================================================================
+    # New Role Ability Handlers
+    # ========================================================================
+
+    def _handle_jail(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Jailor jail action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to jail anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Jail roleblocks and protects the target
+        target.in_jail = True
+        target.jailed_by = action.player_id
+        self.summary.roleblocked_players.add(target_id)
+        self.summary.protected_players.add(target_id)
+
+        logger.info(f"Jailor {action.player_id} jailed {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You jailed {target.name}. They are roleblocked and protected.",
+            target_message="You were hauled off to jail!"
+        )
+
+    def _handle_execute(
+        self,
+        game_state: GameState,
+        action: NightAction
+    ) -> NightActionResult:
+        """Handle Jailor execute action."""
+        jailor = self._get_player(game_state, action.player_id)
+
+        # Find jailed player
+        jailed_player = None
+        for player in game_state.players:
+            if player.in_jail and player.jailed_by == action.player_id:
+                jailed_player = player
+                break
+
+        if not jailed_player:
+            return NightActionResult(
+                action=action,
+                message="You have no one in jail to execute."
+            )
+
+        # Execute the jailed player (Unstoppable attack)
+        death = DeathInfo(
+            player_id=jailed_player.player_id,
+            day_number=game_state.current_day,
+            phase="Night",
+            cause="Executed by Jailor",
+            killer_id=action.player_id
+        )
+
+        self.summary.deaths.append(death)
+
+        logger.info(f"Jailor {action.player_id} executed {jailed_player.player_id}")
+
+        # Check if executed a Town member (Jailor loses executions)
+        if jailed_player.role.faction.value == "Town" if hasattr(jailed_player.role.faction, 'value') else str(jailed_player.role.faction) == "Town":
+            return NightActionResult(
+                action=action,
+                message=f"You executed {jailed_player.name}, but they were TOWN! You have lost your executions.",
+                kill_successful=True
+            )
+
+        return NightActionResult(
+            action=action,
+            message=f"You executed {jailed_player.name}.",
+            kill_successful=True
+        )
+
+    def _handle_alert(
+        self,
+        game_state: GameState,
+        action: NightAction
+    ) -> NightActionResult:
+        """Handle Veteran alert action."""
+        veteran = self._get_player(game_state, action.player_id)
+        veteran.is_alerted = True
+
+        logger.info(f"Veteran {action.player_id} is on alert")
+
+        return NightActionResult(
+            action=action,
+            message="You are on alert! You will attack anyone who visits you."
+        )
+
+    def _handle_vest(
+        self,
+        game_state: GameState,
+        action: NightAction
+    ) -> NightActionResult:
+        """Handle Survivor vest action."""
+        survivor = self._get_player(game_state, action.player_id)
+        survivor.is_vested = True
+
+        # Add to protected players (basic defense)
+        self.summary.protected_players.add(action.player_id)
+
+        logger.info(f"Survivor {action.player_id} put on a vest")
+
+        return NightActionResult(
+            action=action,
+            message="You put on a bulletproof vest. You have Basic defense tonight."
+        )
+
+    def _handle_blackmail(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Blackmailer blackmail action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to blackmail anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+        target.is_blackmailed = True
+        target.can_speak = False
+
+        logger.info(f"Blackmailer {action.player_id} blackmailed {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You blackmailed {target.name}. They cannot speak tomorrow.",
+            target_message="Someone threatened you last night! You cannot speak during the day."
+        )
+
+    def _handle_douse(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Arsonist douse action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to douse anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+        target.is_doused = True
+
+        logger.info(f"Arsonist {action.player_id} doused {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You doused {target.name} in gasoline."
+        )
+
+    def _handle_ignite(
+        self,
+        game_state: GameState,
+        action: NightAction
+    ) -> NightActionResult:
+        """Handle Arsonist ignite action."""
+        # Kill all doused players
+        kills = 0
+        for player in game_state.players:
+            if player.is_doused and player.is_alive:
+                # Unstoppable attack
+                death = DeathInfo(
+                    player_id=player.player_id,
+                    day_number=game_state.current_day,
+                    phase="Night",
+                    cause="Burned by Arsonist",
+                    killer_id=action.player_id
+                )
+                self.summary.deaths.append(death)
+                player.is_doused = False  # Clear douse status
+                kills += 1
+
+        logger.info(f"Arsonist {action.player_id} ignited {kills} players")
+
+        if kills == 0:
+            return NightActionResult(
+                action=action,
+                message="You ignited, but no one was doused."
+            )
+
+        return NightActionResult(
+            action=action,
+            message=f"You ignited {kills} player(s)!",
+            kill_successful=True
+        )
+
+    def _handle_maul(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Werewolf maul action (full moon only)."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to maul anyone."
+            )
+
+        # Check if it's a full moon (every other night)
+        werewolf = self._get_player(game_state, action.player_id)
+        if game_state.current_day % 2 == 0:
+            return NightActionResult(
+                action=action,
+                message="It's not a full moon tonight. You cannot transform."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Kill target with Powerful attack
+        attack = AttackValue.POWERFUL
+        defense = target.role.defense
+
+        deaths_caused = []
+
+        if self._can_kill(attack, defense):
+            death = DeathInfo(
+                player_id=target_id,
+                day_number=game_state.current_day,
+                phase="Night",
+                cause="Mauled by Werewolf",
+                killer_id=action.player_id
+            )
+            self.summary.deaths.append(death)
+            deaths_caused.append(target.name)
+
+        # Also kill all visitors to the target
+        visitors = self.summary.visitors.get(target_id, [])
+        for visitor_id in visitors:
+            if visitor_id == action.player_id:
+                continue  # Don't kill self
+
+            visitor = self._get_player(game_state, visitor_id)
+            if self._can_kill(attack, visitor.role.defense):
+                death = DeathInfo(
+                    player_id=visitor_id,
+                    day_number=game_state.current_day,
+                    phase="Night",
+                    cause="Mauled by Werewolf",
+                    killer_id=action.player_id
+                )
+                self.summary.deaths.append(death)
+                deaths_caused.append(visitor.name)
+
+        logger.info(f"Werewolf {action.player_id} mauled {len(deaths_caused)} players")
+
+        if deaths_caused:
+            return NightActionResult(
+                action=action,
+                message=f"You transformed and mauled: {', '.join(deaths_caused)}",
+                kill_successful=True
+            )
+        else:
+            return NightActionResult(
+                action=action,
+                message="You transformed but your targets had too much defense."
+            )
+
+    def _handle_control(
+        self,
+        game_state: GameState,
+        action: NightAction
+    ) -> NightActionResult:
+        """Handle Witch control action."""
+        # Witch needs two targets: controlled player and new target
+        # This is complex - requires UI to select two targets
+        # For now, simplified implementation
+        logger.warning("Witch control not fully implemented - requires dual target selection")
+
+        return NightActionResult(
+            action=action,
+            message="You controlled your target (simplified implementation)."
+        )
+
+    def _handle_guard(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Bodyguard guard action (protect + counterattack)."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to guard anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Give target powerful defense
+        self.summary.protected_players.add(target_id)
+
+        # Note: Counterattack will be handled in post-processing
+        # when we know who attacked the target
+
+        logger.info(f"Bodyguard {action.player_id} is guarding {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You are guarding {target.name} tonight."
+        )
+
+    # ========================================================================
+    # Additional Role Ability Handlers
+    # ========================================================================
+
+    def _handle_spy(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Spy bug action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to bug anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Spy sees visitors (like Lookout) AND can hear Mafia chat
+        visitors = self.summary.visitors.get(target_id, [])
+        
+        visitor_names = [self._get_player(game_state, v).name for v in visitors] if visitors else []
+        
+        result = f"You bugged {target.name}. "
+        if visitor_names:
+            result += f"Visitors: {', '.join(visitor_names)}. "
+        else:
+            result += "No one visited them. "
+        
+        result += "You also hear Mafia conversations."
+
+        logger.info(f"Spy {action.player_id} bugged {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=result
+        )
+
+    def _handle_medium_seance(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Medium seance action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to seance anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Check if target is dead
+        if target.is_alive:
+            return NightActionResult(
+                action=action,
+                message=f"{target.name} is still alive. You cannot seance them."
+            )
+
+        # Medium can talk to dead player (requires special chat channel)
+        logger.info(f"Medium {action.player_id} is seancing {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You are holding a seance with {target.name}. You can speak to them tonight.",
+            target_message=f"A Medium is holding a seance with you. You can speak to them."
+        )
+
+    def _handle_retributionist_revive(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Retributionist revive action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to revive anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Check if target is dead
+        if target.is_alive:
+            return NightActionResult(
+                action=action,
+                message=f"{target.name} is still alive!"
+            )
+
+        # Check if target was Town
+        target_faction = target.role.faction.value if hasattr(target.role.faction, 'value') else str(target.role.faction)
+        if target_faction != "Town":
+            return NightActionResult(
+                action=action,
+                message=f"{target.name} was not a Town member. You can only revive Town."
+            )
+
+        # Revive the player
+        target.is_alive = True
+        target.death_info = None
+
+        logger.info(f"Retributionist {action.player_id} revived {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You revived {target.name}! They are back in the game.",
+            target_message="You have been revived by a Retributionist!"
+        )
+
+    def _handle_disguise(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Disguiser disguise action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to disguise."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Disguiser will appear as target if target dies
+        # This requires post-processing to swap roles after death
+        logger.info(f"Disguiser {action.player_id} will disguise as {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You will disguise as {target.name} if they die tonight."
+        )
+
+    def _handle_hypnotize(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Hypnotist hypnotize action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to hypnotize anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Hypnotist gives target false information
+        # Simplified: just notify hypnotist
+        logger.info(f"Hypnotist {action.player_id} hypnotized {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You hypnotized {target.name}. They will receive false information."
+        )
+
+    def _handle_juggernaut_rampage(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Juggernaut rampage action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to attack anyone."
+            )
+
+        target = self._get_player(game_state, target_id)
+        juggernaut = self._get_player(game_state, action.player_id)
+
+        # Juggernaut's attack power increases with each kill
+        # Count previous kills (simplified - would track in player state)
+        kills_count = 0
+        for death in game_state.all_deaths:
+            if death.killer_id == action.player_id:
+                kills_count += 1
+
+        # Attack power escalates: Basic -> Powerful -> Unstoppable
+        if kills_count >= 2:
+            attack = AttackValue.UNSTOPPABLE
+        elif kills_count >= 1:
+            attack = AttackValue.POWERFUL
+        else:
+            attack = AttackValue.BASIC
+
+        defense = target.role.defense
+
+        if self._can_kill(attack, defense):
+            death = DeathInfo(
+                player_id=target_id,
+                day_number=game_state.current_day,
+                phase="Night",
+                cause="Killed by Juggernaut",
+                killer_id=action.player_id
+            )
+            self.summary.deaths.append(death)
+
+            logger.info(f"Juggernaut {action.player_id} killed {target_id} (attack level: {attack})")
+
+            return NightActionResult(
+                action=action,
+                message=f"You killed {target.name}! Your power grows stronger.",
+                kill_successful=True
+            )
+        else:
+            return NightActionResult(
+                action=action,
+                message=f"Your target's defense was too high!",
+                kill_blocked_by="defense"
+            )
+
+    def _handle_forge_will(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Forger forge will action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to forge a will."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Forger needs a fake will text (requires UI input)
+        # Simplified: just mark that will will be forged
+        logger.info(f"Forger {action.player_id} will forge {target_id}'s will")
+
+        return NightActionResult(
+            action=action,
+            message=f"You will forge {target.name}'s will if they die tonight."
+        )
+
+    def _handle_amnesiac_remember(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Amnesiac remember action."""
+        if target_id is None:
+            return NightActionResult(
+                action=action,
+                message="You decided not to remember."
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Check if target is dead
+        if target.is_alive:
+            return NightActionResult(
+                action=action,
+                message=f"{target.name} is still alive. You can only remember dead players."
+            )
+
+        # Amnesiac becomes the target's role
+        amnesiac = self._get_player(game_state, action.player_id)
+        amnesiac.role = target.role
+        amnesiac.faction = target.faction
+
+        logger.info(f"Amnesiac {action.player_id} remembered and became {target.role.name}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You remembered! You are now a {target.role.name}."
+        )
+
+    def _clear_night_states(self, game_state: GameState) -> None:
+        """Clear temporary night-specific states on all players."""
+        for player in game_state.players:
+            # Clear states that only last one night
+            player.is_alerted = False
+            player.is_vested = False
+            player.in_jail = False
+            player.jailed_by = None
+            # Note: is_blackmailed persists until next day
+            # Note: is_doused persists until ignited or cleaned
