@@ -30,6 +30,7 @@ class Player(BaseModel):
     is_vested: bool = False  # Survivor vest active
     is_alerted: bool = False  # Veteran alert active
     jailed_by: Optional[int] = None  # Player ID of Jailor (if jailed)
+    executioner_target: Optional[int] = None  # Executioner's target player ID
 
     # Death info (legacy fields for compatibility)
     death_night: int = 0
@@ -39,7 +40,8 @@ class Player(BaseModel):
 
     # Ability tracking
     ability_uses_remaining: dict[str, int] = {}
-    last_action_night: int = 0
+    ability_last_used_night: dict[str, int] = {}  # Track cooldowns per ability
+    last_action_night: int = 0  # General last action (legacy)
 
     # Investigation results (for AI memory)
     investigation_results: list["InvestigationResult"] = []

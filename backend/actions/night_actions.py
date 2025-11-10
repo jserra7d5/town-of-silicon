@@ -405,6 +405,19 @@ class NightActionResolver:
                 message="You decided not to attack anyone."
             )
 
+        attacker = self._get_player(game_state, action.player_id)
+        ability_name = action.ability.name.lower()
+
+        # Check if this ability has limited uses (e.g., Vigilante Shoot)
+        if not self._check_ability_uses(attacker, ability_name):
+            return NightActionResult(
+                action=action,
+                message=f"You have no {ability_name}s remaining!"
+            )
+
+        # Decrement uses (attack attempt counts even if blocked)
+        self._decrement_ability_uses(attacker, ability_name)
+
         target = self._get_player(game_state, target_id)
 
         # Check if target is an alerted Veteran - they kill all visitors
@@ -513,6 +526,15 @@ class NightActionResolver:
                 message="You decided not to clean anyone."
             )
 
+        janitor = self._get_player(game_state, action.player_id)
+
+        # Check if Janitor has cleans remaining
+        if not self._check_ability_uses(janitor, "clean"):
+            return NightActionResult(
+                action=action,
+                message="You have no cleans remaining!"
+            )
+
         target = self._get_player(game_state, target_id)
 
         # Mark target for cleaning - will be applied if they die tonight
@@ -520,6 +542,8 @@ class NightActionResolver:
         for death in self.summary.deaths:
             if death.player_id == target_id:
                 death.cleaned = True
+                # Decrement uses only if cleaning is successful
+                self._decrement_ability_uses(janitor, "clean")
                 logger.info(f"Janitor {action.player_id} cleaned {target_id}")
                 return NightActionResult(
                     action=action,
@@ -527,6 +551,7 @@ class NightActionResolver:
                 )
 
         # Target didn't die, cleaning saved for later
+        # Note: Use is not decremented if target doesn't die
         logger.info(f"Janitor {action.player_id} prepared to clean {target_id}")
 
         return NightActionResult(
@@ -678,6 +703,13 @@ class NightActionResolver:
         """Handle Jailor execute action."""
         jailor = self._get_player(game_state, action.player_id)
 
+        # Check if Jailor has executions remaining
+        if not self._check_ability_uses(jailor, "execute"):
+            return NightActionResult(
+                action=action,
+                message="You have no executions remaining!"
+            )
+
         # Find jailed player
         jailed_player = None
         for player in game_state.players:
@@ -690,6 +722,9 @@ class NightActionResolver:
                 action=action,
                 message="You have no one in jail to execute."
             )
+
+        # Decrement uses (will be set to 0 if executing Town)
+        self._decrement_ability_uses(jailor, "execute")
 
         # Execute the jailed player (Unstoppable attack)
         death = DeathInfo(
@@ -704,8 +739,9 @@ class NightActionResolver:
 
         logger.info(f"Jailor {action.player_id} executed {jailed_player.player_id}")
 
-        # Check if executed a Town member (Jailor loses executions)
+        # Check if executed a Town member (Jailor loses ALL executions)
         if jailed_player.role.faction.value == "Town" if hasattr(jailed_player.role.faction, 'value') else str(jailed_player.role.faction) == "Town":
+            self._set_ability_uses(jailor, "execute", 0)
             return NightActionResult(
                 action=action,
                 message=f"You executed {jailed_player.name}, but they were TOWN! You have lost your executions.",
@@ -725,7 +761,18 @@ class NightActionResolver:
     ) -> NightActionResult:
         """Handle Veteran alert action."""
         veteran = self._get_player(game_state, action.player_id)
+
+        # Check if Veteran has alerts remaining
+        if not self._check_ability_uses(veteran, "alert"):
+            return NightActionResult(
+                action=action,
+                message="You have no alerts remaining!"
+            )
+
         veteran.is_alerted = True
+
+        # Decrement uses
+        self._decrement_ability_uses(veteran, "alert")
 
         logger.info(f"Veteran {action.player_id} is on alert")
 
@@ -741,10 +788,21 @@ class NightActionResolver:
     ) -> NightActionResult:
         """Handle Survivor vest action."""
         survivor = self._get_player(game_state, action.player_id)
+
+        # Check if Survivor has vests remaining
+        if not self._check_ability_uses(survivor, "vest"):
+            return NightActionResult(
+                action=action,
+                message="You have no bulletproof vests remaining!"
+            )
+
         survivor.is_vested = True
 
         # Add to protected players (basic defense)
         self.summary.protected_players.add(action.player_id)
+
+        # Decrement uses
+        self._decrement_ability_uses(survivor, "vest")
 
         logger.info(f"Survivor {action.player_id} put on a vest")
 
@@ -850,13 +908,17 @@ class NightActionResolver:
                 message="You decided not to maul anyone."
             )
 
-        # Check if it's a full moon (every other night)
         werewolf = self._get_player(game_state, action.player_id)
-        if game_state.current_day % 2 == 0:
+
+        # Check cooldown (every other night)
+        if not self._check_cooldown(werewolf, action.ability, game_state.current_day):
             return NightActionResult(
                 action=action,
                 message="It's not a full moon tonight. You cannot transform."
             )
+
+        # Update cooldown
+        self._update_cooldown(werewolf, "maul", game_state.current_day)
 
         target = self._get_player(game_state, target_id)
 
@@ -1036,6 +1098,15 @@ class NightActionResolver:
                 message="You decided not to revive anyone."
             )
 
+        retributionist = self._get_player(game_state, action.player_id)
+
+        # Check if Retributionist has revive uses remaining (should be 1)
+        if not self._check_ability_uses(retributionist, "revive"):
+            return NightActionResult(
+                action=action,
+                message="You have already used your revive!"
+            )
+
         target = self._get_player(game_state, target_id)
 
         # Check if target is dead
@@ -1056,6 +1127,9 @@ class NightActionResolver:
         # Revive the player
         target.is_alive = True
         target.death_info = None
+
+        # Decrement uses (one-time use)
+        self._decrement_ability_uses(retributionist, "revive")
 
         logger.info(f"Retributionist {action.player_id} revived {target_id}")
 
@@ -1078,7 +1152,19 @@ class NightActionResolver:
                 message="You decided not to disguise."
             )
 
+        disguiser = self._get_player(game_state, action.player_id)
+
+        # Check if Disguiser has disguises remaining
+        if not self._check_ability_uses(disguiser, "disguise"):
+            return NightActionResult(
+                action=action,
+                message="You have no disguises remaining!"
+            )
+
         target = self._get_player(game_state, target_id)
+
+        # Decrement uses (attempt counts as use)
+        self._decrement_ability_uses(disguiser, "disguise")
 
         # Disguiser will appear as target if target dies
         # This requires post-processing to swap roles after death
@@ -1183,7 +1269,19 @@ class NightActionResolver:
                 message="You decided not to forge a will."
             )
 
+        forger = self._get_player(game_state, action.player_id)
+
+        # Check if Forger has forges remaining
+        if not self._check_ability_uses(forger, "forge"):
+            return NightActionResult(
+                action=action,
+                message="You have no forges remaining!"
+            )
+
         target = self._get_player(game_state, target_id)
+
+        # Decrement uses (attempt counts as use)
+        self._decrement_ability_uses(forger, "forge")
 
         # Forger needs a fake will text (requires UI input)
         # Simplified: just mark that will will be forged
@@ -1207,6 +1305,15 @@ class NightActionResolver:
                 message="You decided not to remember."
             )
 
+        amnesiac = self._get_player(game_state, action.player_id)
+
+        # Check if Amnesiac has remember uses remaining (should be 1)
+        if not self._check_ability_uses(amnesiac, "remember"):
+            return NightActionResult(
+                action=action,
+                message="You have already remembered a role!"
+            )
+
         target = self._get_player(game_state, target_id)
 
         # Check if target is dead
@@ -1217,15 +1324,109 @@ class NightActionResolver:
             )
 
         # Amnesiac becomes the target's role
-        amnesiac = self._get_player(game_state, action.player_id)
         amnesiac.role = target.role
         amnesiac.faction = target.faction
+
+        # Decrement uses (one-time use)
+        self._decrement_ability_uses(amnesiac, "remember")
 
         logger.info(f"Amnesiac {action.player_id} remembered and became {target.role.name}")
 
         return NightActionResult(
             action=action,
             message=f"You remembered! You are now a {target.role.name}."
+        )
+
+    # ========================================================================
+    # Ability Use Tracking & Cooldowns
+    # ========================================================================
+
+    def _check_cooldown(self, player: Player, ability: RoleAbility, current_night: int) -> bool:
+        """
+        Check if ability is off cooldown.
+
+        Args:
+            player: Player using the ability
+            ability: The ability being used
+            current_night: Current night number
+
+        Returns:
+            True if ability is ready to use, False if on cooldown
+        """
+        if ability.cooldown_nights == 0:
+            return True  # No cooldown
+
+        ability_name = ability.name.lower()
+
+        # Check if ability has been used before
+        if ability_name not in player.ability_last_used_night:
+            return True  # First use, always ready
+
+        last_used = player.ability_last_used_night[ability_name]
+        nights_since_use = current_night - last_used
+
+        # Must wait cooldown_nights before using again
+        return nights_since_use > ability.cooldown_nights
+
+    def _update_cooldown(self, player: Player, ability_name: str, current_night: int) -> None:
+        """
+        Update the last used night for an ability.
+
+        Args:
+            player: Player who used the ability
+            ability_name: Name of the ability used
+            current_night: Current night number
+        """
+        player.ability_last_used_night[ability_name] = current_night
+        logger.debug(
+            f"Player {player.player_id} used {ability_name} on night {current_night}"
+        )
+
+    def _check_ability_uses(self, player: Player, ability_name: str) -> bool:
+        """
+        Check if player has remaining uses for an ability.
+
+        Args:
+            player: Player using the ability
+            ability_name: Name of the ability to check
+
+        Returns:
+            True if player can use ability, False otherwise
+        """
+        # If ability not in dictionary, it's unlimited use
+        if ability_name not in player.ability_uses_remaining:
+            return True
+
+        uses_remaining = player.ability_uses_remaining[ability_name]
+        return uses_remaining > 0
+
+    def _decrement_ability_uses(self, player: Player, ability_name: str) -> None:
+        """
+        Decrement the uses remaining for an ability.
+
+        Args:
+            player: Player who used the ability
+            ability_name: Name of the ability used
+        """
+        if ability_name in player.ability_uses_remaining:
+            player.ability_uses_remaining[ability_name] -= 1
+            logger.debug(
+                f"Player {player.player_id} used {ability_name}. "
+                f"Uses remaining: {player.ability_uses_remaining[ability_name]}"
+            )
+
+    def _set_ability_uses(self, player: Player, ability_name: str, uses: int) -> None:
+        """
+        Set the uses remaining for an ability to a specific value.
+
+        Args:
+            player: Player whose ability to modify
+            ability_name: Name of the ability
+            uses: Number of uses to set
+        """
+        player.ability_uses_remaining[ability_name] = uses
+        logger.debug(
+            f"Player {player.player_id} {ability_name} uses set to {uses}"
         )
 
     def _clear_night_states(self, game_state: GameState) -> None:

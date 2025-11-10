@@ -247,8 +247,18 @@ class VotingManager:
             logger.warning(f"Player {player_id} tried to reveal as Mayor but isn't Mayor")
             return False
 
+        # Check if Mayor has already revealed (max 1 use)
+        if "reveal" in player.ability_uses_remaining:
+            if player.ability_uses_remaining["reveal"] <= 0:
+                logger.warning(f"Mayor {player_id} has already revealed")
+                return False
+
         # Mark mayor as revealed
         player.revealed = True
+
+        # Decrement reveal uses
+        if "reveal" in player.ability_uses_remaining:
+            player.ability_uses_remaining["reveal"] -= 1
 
         logger.info(f"Player {player_id} ({player.name}) revealed as Mayor! They now have 3 votes.")
 

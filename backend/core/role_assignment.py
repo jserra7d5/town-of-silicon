@@ -333,7 +333,44 @@ class RoleAssignmentSystem:
 
             players.append(player)
 
+        # Assign Executioner targets after all players are created
+        self._assign_executioner_targets(players)
+
         return players
+
+    def _assign_executioner_targets(self, players: List[Player]) -> None:
+        """
+        Assign targets to Executioner players.
+
+        Executioners get a random Town member as their target, excluding unique roles.
+
+        Args:
+            players: List of all players
+        """
+        executioners = [p for p in players if p.role.id == "executioner"]
+
+        if not executioners:
+            return
+
+        # Get eligible targets (Town members, excluding unique roles)
+        eligible_targets = [
+            p for p in players
+            if p.role.faction.value == "Town" and not p.role.unique
+        ]
+
+        if not eligible_targets:
+            logger.warning("No eligible targets for Executioner - will target any Town")
+            eligible_targets = [p for p in players if p.role.faction.value == "Town"]
+
+        for executioner in executioners:
+            # Pick random target
+            target = random.choice(eligible_targets)
+            executioner.executioner_target = target.player_id
+
+            logger.info(
+                f"Executioner {executioner.player_id} ({executioner.name}) "
+                f"assigned target: {target.player_id} ({target.name}, {target.role.name})"
+            )
 
     def _generate_ai_name(self, player_id: int) -> str:
         """Generate a name for an AI player."""

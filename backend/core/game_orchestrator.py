@@ -409,6 +409,25 @@ class GameOrchestrator:
             except Exception as e:
                 logger.error(f"Error applying death to player {death.player_id}: {e}")
 
+        # Check for Executioner target deaths - convert to Jester
+        dead_player_ids = {death.player_id for death in summary.deaths}
+        for player in self.game_state.players:
+            if (player.role.id == "executioner" and
+                player.is_alive and
+                player.executioner_target in dead_player_ids):
+                # Target died at night - convert to Jester
+                from ..core.role_assignment import role_registry
+                jester_role = role_registry.get_role("jester")
+                player.role = jester_role
+                player.faction = jester_role.faction
+                logger.info(
+                    f"Executioner {player.name}'s target died at night. "
+                    f"Converting to Jester."
+                )
+                await self.broadcast_system_message(
+                    f"{player.name}'s target died! They have become a Jester."
+                )
+
         # Send action results to players
         for player_id, result in summary.action_results.items():
             try:
@@ -771,10 +790,15 @@ class GameOrchestrator:
         # Check if any Executioner's target was lynched
         for player in self.game_state.players:
             if player.role.id == "executioner" and player.is_alive:
-                # Check if this player's target was lynched
-                # Executioner target is stored in role metadata (not implemented in current model)
-                # For now, we'll skip this - would need to add target tracking to Player model
-                pass
+                if player.executioner_target == lynched_player_id:
+                    logger.info(
+                        f"Executioner {player.name} wins! Their target "
+                        f"{lynched_player.name} was lynched!"
+                    )
+                    await self.broadcast_system_message(
+                        f"⚖️ {player.name} was an Executioner and wins! "
+                        f"Their target {lynched_player.name} was lynched!"
+                    )
 
     def check_victory(self) -> Optional[str]:
         """
