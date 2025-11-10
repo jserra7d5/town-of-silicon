@@ -31,6 +31,8 @@ class Player(BaseModel):
     is_alerted: bool = False  # Veteran alert active
     jailed_by: Optional[int] = None  # Player ID of Jailor (if jailed)
     executioner_target: Optional[int] = None  # Executioner's target player ID
+    jester_guilty_voters: list[int] = []  # List of player IDs who voted guilty (for Jester haunt)
+    can_haunt: bool = False  # Jester can haunt after being lynched
 
     # Death info (legacy fields for compatibility)
     death_night: int = 0

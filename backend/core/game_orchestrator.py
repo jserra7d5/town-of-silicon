@@ -730,6 +730,19 @@ class GameOrchestrator:
         accused.death_info = death
         self.game_state.all_deaths.append(death)
 
+        # If Jester was lynched, store guilty voters for haunt ability
+        if accused.role.id == "jester":
+            guilty_voter_ids = [
+                voter_id
+                for voter_id, vote in self.game_state.last_judgment_result.voters.items()
+                if vote == "guilty"
+            ]
+            accused.jester_guilty_voters = guilty_voter_ids
+            accused.can_haunt = True
+            logger.info(
+                f"Jester {accused.name} can haunt one of {len(guilty_voter_ids)} guilty voters"
+            )
+
         await self.broadcast_system_message(
             f"{accused.name} was lynched. They were a {accused.role.name}."
         )

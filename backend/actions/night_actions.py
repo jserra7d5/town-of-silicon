@@ -213,6 +213,9 @@ class NightActionResolver:
         elif ability_name == "remember":
             return self._handle_amnesiac_remember(game_state, action, actual_target)
 
+        elif ability_name == "haunt":
+            return self._handle_jester_haunt(game_state, action, actual_target)
+
         elif ability_name in ["attack", "shoot", "assassinate", "kill"]:
             return self._handle_attack(game_state, action, actual_target)
 
@@ -1335,6 +1338,77 @@ class NightActionResolver:
         return NightActionResult(
             action=action,
             message=f"You remembered! You are now a {target.role.name}."
+        )
+
+    def _handle_jester_haunt(
+        self,
+        game_state: GameState,
+        action: NightAction,
+        target_id: Optional[int]
+    ) -> NightActionResult:
+        """Handle Jester haunt action (dead Jester haunting guilty voter)."""
+        jester = self._get_player(game_state, action.player_id)
+
+        # Check if Jester can haunt
+        if not jester.can_haunt:
+            return NightActionResult(
+                action=action,
+                message="You cannot haunt anyone."
+            )
+
+        # Check if Jester has haunt uses remaining (should be 1)
+        if not self._check_ability_uses(jester, "haunt"):
+            return NightActionResult(
+                action=action,
+                message="You have already used your haunt!"
+            )
+
+        if target_id is None:
+            # Jester chose not to haunt
+            jester.can_haunt = False
+            self._decrement_ability_uses(jester, "haunt")
+            return NightActionResult(
+                action=action,
+                message="You decided not to haunt anyone."
+            )
+
+        # Check if target voted guilty
+        if target_id not in jester.jester_guilty_voters:
+            return NightActionResult(
+                action=action,
+                message="You can only haunt someone who voted you guilty!"
+            )
+
+        target = self._get_player(game_state, target_id)
+
+        # Check if target is still alive
+        if not target.is_alive:
+            return NightActionResult(
+                action=action,
+                message=f"{target.name} is already dead!"
+            )
+
+        # Haunt kills with Unstoppable attack (ignores all protection)
+        death = DeathInfo(
+            player_id=target_id,
+            day_number=game_state.current_day,
+            phase="Night",
+            cause="Haunted by Jester",
+            killer_id=action.player_id
+        )
+
+        self.summary.deaths.append(death)
+
+        # Disable haunt and decrement uses
+        jester.can_haunt = False
+        self._decrement_ability_uses(jester, "haunt")
+
+        logger.info(f"Jester {action.player_id} haunted {target_id}")
+
+        return NightActionResult(
+            action=action,
+            message=f"You haunted {target.name}! They will die tonight.",
+            kill_successful=True
         )
 
     # ========================================================================
