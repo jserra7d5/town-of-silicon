@@ -32,5 +32,9 @@ httpx==0.25.2  # For testing FastAPI
 # Code Quality (Development)
 ruff==0.1.6
 
+# Optional: Anthropic API (if using Pydantic AI with Claude)
+# anthropic==0.7.0
+# openai==1.3.0
+
 # Python Version
 # Requires: Python 3.11+
